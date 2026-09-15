@@ -68,6 +68,7 @@ private:
     void embedSdLine(std::span<std::uint16_t> hanc, const std::vector<Pending>& samples,
                      bool muted);
     bool noAudioLine(int line) const;
+    int  maxSamplesPerLine() const;   // per group, from this raster's HANC size
 
     pcapreplay::SdiFormatInfo       fi_;
     AudioSettings                   settings_;

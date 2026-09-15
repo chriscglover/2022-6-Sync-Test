@@ -98,6 +98,18 @@ std::int32_t AudioEmbedder::toneSample(std::uint64_t n, int channel) const {
     return std::int32_t(std::lround(amplitude * std::sin(2.0 * kPi * cycles)));
 }
 
+int AudioEmbedder::maxSamplesPerLine() const {
+    const int lineWords = fi_.totalSamples * 2;
+    const int hanc = lineWords - fi_.activeWidth * 2 - postActiveWords(fi_) - savWords(fi_);
+    const int groups = settings_.groups;
+    if (fi_.isHd) {
+        // One 31-word ST 299 packet per sample per group, on alternate words.
+        return std::max(1, (hanc / 2) / (31 * groups));
+    }
+    // One ST 272 packet per group per line: 7 words plus 12 per sample.
+    return std::max(1, (hanc / groups - 7) / 12);
+}
+
 bool AudioEmbedder::noAudioLine(int line) const {
     // Audio is not carried on the line after a switching line.
     switch (fi_.totalLines) {
@@ -132,6 +144,26 @@ void AudioEmbedder::embed(SdiFrameBuilder& builder, std::uint64_t frameIndex, bo
         line = std::min(line, fi_.totalLines);
         lines_[std::size_t(line)].push_back({s, phase, moved});
     }
+
+    // A line's HANC holds only so many packets. With all four groups, the line
+    // after a switching point (which takes the skipped line's samples too) can
+    // exceed it on 1080i59.94, 720p59.94 and SD, so carry the excess forward to
+    // the following lines, which on average carry well under their capacity.
+    const std::size_t capacity = std::size_t(maxSamplesPerLine());
+    std::vector<Pending> carry;
+    for (int ln = 1; ln <= fi_.totalLines; ++ln) {
+        auto& samples = lines_[std::size_t(ln)];
+        if (!carry.empty()) {
+            for (auto& p : carry) p.movedPastSwitch = true;
+            samples.insert(samples.begin(), carry.begin(), carry.end());
+            carry.clear();
+        }
+        if (samples.size() > capacity) {
+            carry.assign(samples.begin() + std::ptrdiff_t(capacity), samples.end());
+            samples.resize(capacity);
+        }
+    }
+    stats_.overflowedPackets += carry.size() * std::size_t(settings_.groups);
 
     for (int ln = 1; ln <= fi_.totalLines; ++ln) {
         std::span<std::uint16_t> hanc = builder.hancSpan(ln);
