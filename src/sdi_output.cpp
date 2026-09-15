@@ -83,7 +83,12 @@ bool SdiOutput::start(const SdiOutputConfig& cfg, std::string& error) {
         " caps=\"" + videoCaps + "\" ! videoconvert ! decklinkvideosink device-number=" + device +
         " mode=" + mode->nick +
         " appsrc name=asrc is-live=true format=time block=true max-bytes=" + std::to_string(48000 / 5 * 4 * channels) +
-        " caps=\"" + audioCaps + "\" ! decklinkaudiosink device-number=" + device;
+        " caps=\"" + audioCaps + "\" ! decklinkaudiosink device-number=" + device +
+        // An audio sink only realigns to its timestamps once they are further
+        // out than alignment-threshold (40 ms by default), so without this the
+        // tone can start up to a frame away from the picture and stay there.
+        // The timestamps here are exact, so hold the sink to them.
+        " alignment-threshold=2000000 discont-wait=0";
 
     GError* gerror = nullptr;
     pipeline_ = gst_parse_launch(description.c_str(), &gerror);
