@@ -30,8 +30,13 @@ white for `--flash-frames` frames (default 1). The tone is muted for exactly
 those frames. The timecode and marker are drawn over the flash, so the flash
 frame can still be identified.
 
-**Audio:** a 1 kHz tone at -18 dBFS in every channel of `--audio-groups` groups
-(four channels each, default 1).
+**Audio:** a 1 kHz tone in every channel of `--audio-groups` groups (four
+channels each; the default of 4 gives all 16 channels).
+
+- **Levels:** a staircase. Channel 1 is at `--tone-level`, default -18 dBFS, and
+  each later channel is `--tone-step` lower, default 3 dB, down to -63 dBFS on
+  channel 16. Every channel has its own level, so any swap, sum or missing
+  channel shows on a meter.
 
 - HD uses SMPTE ST 299-1 in the colour-difference HANC, 24-bit.
 - SD uses ST 272, 20-bit.

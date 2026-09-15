@@ -182,9 +182,11 @@ void SdiOutput::run(SdiOutputConfig cfg) {
         GstMapInfo map;
         gst_buffer_map(audio, &map, GST_MAP_WRITE);
         for (std::uint64_t i = 0; i < count; ++i) {
-            const std::int32_t value = mute ? 0 : std::int32_t(std::uint32_t(composer.audio().toneSample(first + i)) << 8);
-            for (int c = 0; c < channels; ++c)
+            for (int c = 0; c < channels; ++c) {
+                const std::int32_t value =
+                    mute ? 0 : std::int32_t(std::uint32_t(composer.audio().toneSample(first + i, c)) << 8);
                 std::memcpy(map.data + (i * std::uint64_t(channels) + std::uint64_t(c)) * 4, &value, 4);
+            }
         }
         gst_buffer_unmap(audio, &map);
         GST_BUFFER_PTS(audio) = gst_util_uint64_scale(first, GST_SECOND, 48000);

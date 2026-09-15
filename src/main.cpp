@@ -122,12 +122,14 @@ void usage() {
 "\n"
 "Signal\n"
 "  --format F             raster (default 1080i50); --formats lists them\n"
-"  --title TEXT           top line of the picture (default \"ST 2022 TEST SIGNAL\")\n"
+"  --title TEXT           top line of the picture (default \"VIDEO TEST SIGNAL\")\n"
 "  --flash-every S        seconds between flashes, whole frames (default 2; 0 = none)\n"
 "  --flash-frames N       frames each flash and mute lasts (default 1)\n"
 "  --tone HZ              tone frequency (default 1000)\n"
-"  --tone-level DBFS      tone level (default -18)\n"
-"  --audio-groups N       embedded audio groups, four channels each (default 1)\n"
+"  --tone-level DBFS      tone level on channel 1 (default -18)\n"
+"  --tone-step DB         each later channel this much lower (default 3:\n"
+"                         16 channels step from -18 to -63 dBFS)\n"
+"  --audio-groups N       embedded audio groups, four channels each (default 4)\n"
 "  --tc-start TC          timecode on the first frame, HH:MM:SS:FF (default:\n"
 "                         time of day when the first frame leaves)\n"
 "  --run-tag N            frame marker run tag (default: random, printed at start)\n"
@@ -187,6 +189,7 @@ int main(int argc, char** argv) {
         else if (a == "--flash-frames") cfg.composer.flashFrames = std::atoi(val().c_str());
         else if (a == "--tone")         cfg.composer.audio.toneHz = std::atof(val().c_str());
         else if (a == "--tone-level")   cfg.composer.audio.levelDbfs = std::atof(val().c_str());
+        else if (a == "--tone-step")    cfg.composer.audio.stepDb = std::atof(val().c_str());
         else if (a == "--audio-groups") cfg.composer.audio.groups = std::atoi(val().c_str());
         else if (a == "--tc-start")     tcStart = val();
         else if (a == "--run-tag")      { cfg.composer.runTag = std::strtoull(val().c_str(), nullptr, 0); haveRunTag = true; }
@@ -242,6 +245,10 @@ int main(int argc, char** argv) {
         std::printf("--tone must be below 24000 Hz and --tone-level at most 0 dBFS\n");
         return 2;
     }
+    if (cfg.composer.audio.stepDb < 0.0 || cfg.composer.audio.stepDb > 6.0) {
+        std::printf("--tone-step must be between 0 and 6 dB\n");
+        return 2;
+    }
     if (!tcStart.empty()) {
         Timecode tc;
         if (!parseTimecode(tcStart, tc)) {
@@ -271,8 +278,9 @@ int main(int argc, char** argv) {
 
         std::printf("st2022_testsignal %s\n", kVersion);
         std::printf("format     : %s\n", formatDescription(fi.id).c_str());
-        std::printf("audio      : %d group(s) of tone, %.0f Hz at %.1f dBFS\n", cfg.composer.audio.groups,
-                    cfg.composer.audio.toneHz, cfg.composer.audio.levelDbfs);
+        std::printf("audio      : %d group(s) of tone, %.0f Hz, channel 1 at %.1f dBFS, %g dB lower per channel\n",
+                    cfg.composer.audio.groups, cfg.composer.audio.toneHz, cfg.composer.audio.levelDbfs,
+                    cfg.composer.audio.stepDb);
         if (cfg.composer.flashPeriodFrames > 0)
             std::printf("sync pulse : white flash + mute for %d frame(s) every %d frames\n",
                         cfg.composer.flashFrames, cfg.composer.flashPeriodFrames);
@@ -338,8 +346,9 @@ int main(int argc, char** argv) {
     WinsockScope sockets;
     std::printf("st2022_testsignal %s\n", kVersion);
     std::printf("format     : %s\n", formatDescription(fi.id).c_str());
-    std::printf("audio      : %d group(s), %.0f Hz at %.1f dBFS\n", cfg.composer.audio.groups,
-                cfg.composer.audio.toneHz, cfg.composer.audio.levelDbfs);
+    std::printf("audio      : %d group(s), %.0f Hz, channel 1 at %.1f dBFS, %g dB lower per channel\n",
+                cfg.composer.audio.groups, cfg.composer.audio.toneHz, cfg.composer.audio.levelDbfs,
+                cfg.composer.audio.stepDb);
     if (cfg.composer.flashPeriodFrames > 0)
         std::printf("sync pulse : white flash + mute for %d frame(s) every %d frames\n",
                     cfg.composer.flashFrames, cfg.composer.flashPeriodFrames);

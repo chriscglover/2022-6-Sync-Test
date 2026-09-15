@@ -41,12 +41,12 @@ FrameComposer::FrameComposer(const ComposerSettings& settings)
     for (char& c : name) c = char(std::toupper(static_cast<unsigned char>(c)));
     char buf[160];
     if (settings_.flashPeriodFrames > 0)
-        std::snprintf(buf, sizeof buf, "%s  %.0f HZ %.0f DBFS  FLASH+MUTE EVERY %d FRAMES",
+        std::snprintf(buf, sizeof buf, "%s  %.0f HZ %.0f DBFS CH1, -%g DB/CH  FLASH+MUTE EVERY %d FRAMES",
                       name.c_str(), settings_.audio.toneHz, settings_.audio.levelDbfs,
-                      settings_.flashPeriodFrames);
+                      settings_.audio.stepDb, settings_.flashPeriodFrames);
     else
-        std::snprintf(buf, sizeof buf, "%s  %.0f HZ %.0f DBFS", name.c_str(),
-                      settings_.audio.toneHz, settings_.audio.levelDbfs);
+        std::snprintf(buf, sizeof buf, "%s  %.0f HZ %.0f DBFS CH1, -%g DB/CH", name.c_str(),
+                      settings_.audio.toneHz, settings_.audio.levelDbfs, settings_.audio.stepDb);
     detailText_ = buf;
 
     lineWords_ = fi_.totalSamples * 2;

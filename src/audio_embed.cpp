@@ -74,7 +74,8 @@ std::array<std::uint8_t, 6> st299Ecc(const std::uint8_t* first24) {
 AudioEmbedder::AudioEmbedder(const SdiFormatInfo& fi, const AudioSettings& settings)
     : fi_(fi), settings_(settings) {
     settings_.groups = std::clamp(settings_.groups, 1, 4);
-    amplitude_ = std::pow(10.0, settings_.levelDbfs / 20.0) * double((1 << 23) - 1);
+    for (int c = 0; c < 16; ++c)
+        amplitudes_[std::size_t(c)] = std::pow(10.0, settings_.channelDbfs(c) / 20.0) * double((1 << 23) - 1);
     status_ = professionalChannelStatus(fi_.isHd ? 24 : 20);
     dbn_.fill(1);
     lines_.resize(std::size_t(fi_.totalLines) + 2);
@@ -90,10 +91,11 @@ std::uint64_t AudioEmbedder::firstSampleOfFrame(const SdiFormatInfo& fi,
     return std::uint64_t((n + num - 1) / num);
 }
 
-std::int32_t AudioEmbedder::toneSample(std::uint64_t n) const {
+std::int32_t AudioEmbedder::toneSample(std::uint64_t n, int channel) const {
     const double cycles = settings_.toneHz * double(n % std::uint64_t(kAudioRateHz * 1000)) /
                           double(kAudioRateHz);
-    return std::int32_t(std::lround(amplitude_ * std::sin(2.0 * kPi * cycles)));
+    const double amplitude = amplitudes_[std::size_t(std::clamp(channel, 0, 15))];
+    return std::int32_t(std::lround(amplitude * std::sin(2.0 * kPi * cycles)));
 }
 
 bool AudioEmbedder::noAudioLine(int line) const {
@@ -157,10 +159,10 @@ void AudioEmbedder::embedHdLine(std::span<std::uint16_t> hanc,
             udw[1] = std::uint8_t(((p.clockPhase >> 8) & 0x0F) | (((p.clockPhase >> 12) & 1) << 5) |
                                   (p.movedPastSwitch ? 0x10 : 0));
 
-            const std::int32_t value = muted ? 0 : toneSample(p.sample);
             const int blockPos = int(p.sample % 192);
             const bool c = (status_[std::size_t(blockPos / 8)] >> (blockPos % 8)) & 1;
             for (int ch = 0; ch < 4; ++ch) {
+                const std::int32_t value = muted ? 0 : toneSample(p.sample, group * 4 + ch);
                 // AES subframe time slots 4..31: 24 audio bits, V, U, C, P.
                 std::uint32_t sub = (std::uint32_t(value) & 0xFFFFFFu) << 4;
                 if (c) sub |= 1u << 30;
@@ -217,11 +219,11 @@ void AudioEmbedder::embedSdLine(std::span<std::uint16_t> hanc,
         w[5] = ancDataWord(std::uint8_t(dc));
         std::size_t k = 6;
         for (const Pending& p : samples) {
-            const std::int32_t value = muted ? 0 : toneSample(p.sample);
-            const std::uint32_t s20 = std::uint32_t(value >> 4) & 0xFFFFFu;
             const int blockPos = int(p.sample % 192);
             const std::uint32_t c = (status_[std::size_t(blockPos / 8)] >> (blockPos % 8)) & 1;
             for (int ch = 0; ch < 4; ++ch) {
+                const std::int32_t value = muted ? 0 : toneSample(p.sample, group * 4 + ch);
+                const std::uint32_t s20 = std::uint32_t(value >> 4) & 0xFFFFFu;
                 std::uint32_t x0 = (blockPos == 0 ? 1u : 0u) | (std::uint32_t(ch) << 1) |
                                    ((s20 & 0x3F) << 3);
                 std::uint32_t x1 = (s20 >> 6) & 0x1FF;

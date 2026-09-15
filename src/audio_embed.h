@@ -21,10 +21,15 @@ namespace testsignal {
 
 inline constexpr int kAudioRateHz = 48000;
 
+// The tone steps down channel by channel from channel 1, so every channel has
+// its own level and any swap, sum or loss shows on a meter.
 struct AudioSettings {
-    int    groups = 1;          // 1..4, four channels each
+    int    groups = 4;          // 1..4, four channels each
     double toneHz = 1000.0;
-    double levelDbfs = -18.0;   // EBU R68 alignment level
+    double levelDbfs = -18.0;   // channel 1; EBU R68 alignment level
+    double stepDb = 3.0;        // each later channel this much lower (16 channels: -18 .. -63)
+
+    double channelDbfs(int channel) const { return levelDbfs - stepDb * double(channel); }  // 0-based
 };
 
 struct AudioEmbedStats {
@@ -41,8 +46,9 @@ public:
     static std::uint64_t firstSampleOfFrame(const pcapreplay::SdiFormatInfo& fi,
                                             std::uint64_t frameIndex);
 
-    // The signed 24-bit tone value for sample `n`, before muting.
-    std::int32_t toneSample(std::uint64_t n) const;
+    // The signed 24-bit tone value for sample `n` on `channel` (0-based across
+    // all groups: 0 is channel 1), before muting.
+    std::int32_t toneSample(std::uint64_t n, int channel = 0) const;
 
     // Replace the frame's HANC with this frame's audio. `muted` embeds silence
     // in every channel for the whole frame.
@@ -65,7 +71,7 @@ private:
 
     pcapreplay::SdiFormatInfo       fi_;
     AudioSettings                   settings_;
-    double                          amplitude_ = 0.0;
+    std::array<double, 16>          amplitudes_{};           // per channel, 24-bit peak
     std::array<std::uint8_t, 24>    status_{};
     std::array<std::uint8_t, 4>     dbn_{};
     std::vector<std::vector<Pending>> lines_;

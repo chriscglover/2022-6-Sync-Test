@@ -320,6 +320,30 @@ void testFormat(SdiFormat format, int flashPeriod, int groups) {
             if (ch1[i] != want) ++mismatches;
         }
         CHECK(mismatches == 0);
+
+        // Every channel carries the tone, each at its own step of the staircase.
+        for (int channel = 1; channel < 4 * groups; ++channel) {
+            const auto it = audio.samples.find(channel);
+            if (it == audio.samples.end()) { CHECK(false); continue; }
+            int wrong = it->second.size() == ch1.size() ? 0 : 1;
+            for (std::size_t i = 0; i < it->second.size() && i < ch1.size(); ++i) {
+                std::int32_t want = composer.isFlash(std::uint64_t(k)) ? 0 : composer.audio().toneSample(first + i, channel);
+                if (!fi.isHd) want = (want >> 4) * 16;
+                if (it->second[i] != want) ++wrong;
+            }
+            CHECK(wrong == 0);
+        }
+        if (!composer.isFlash(std::uint64_t(k))) {
+            double energy1 = 0;
+            for (const std::int32_t v : ch1) energy1 += double(v) * v;
+            for (int channel = 1; channel < 4 * groups; ++channel) {
+                if (!audio.samples.count(channel)) continue;
+                double energy = 0;
+                for (const std::int32_t v : audio.samples.at(channel)) energy += double(v) * v;
+                const double relativeDb = 10.0 * std::log10(energy / energy1);
+                CHECK(std::fabs(relativeDb + s.audio.stepDb * channel) < 0.1);
+            }
+        }
         if (k == 0) {
             CHECK(audio.zFlags > 0);
             if (fi.isHd) CHECK(audio.channelStatusStartsBlock);
@@ -338,12 +362,15 @@ int main() {
     testMarkerPayload();
     testChannelStatus();
     testDeckLinkModes();
+    // Four groups (the default, 16 channels) must fit every raster's HANC.
     testFormat(SdiFormat::HD1080i25, 3, 1);
+    testFormat(SdiFormat::HD1080i25, 3, 4);
     testFormat(SdiFormat::HD1080p50, 4, 4);
-    testFormat(SdiFormat::HD1080i2997, 3, 2);
-    testFormat(SdiFormat::HD720p5994, 3, 1);
-    testFormat(SdiFormat::SD625i25, 3, 1);
-    testFormat(SdiFormat::SD525i2997, 3, 2);
+    testFormat(SdiFormat::HD1080i2997, 3, 4);
+    testFormat(SdiFormat::HD1080p5994, 3, 4);
+    testFormat(SdiFormat::HD720p5994, 3, 4);
+    testFormat(SdiFormat::SD625i25, 3, 4);
+    testFormat(SdiFormat::SD525i2997, 3, 4);
     std::printf("\n%d checks, %d failed\n", g_checks, g_failures);
     return g_failures ? 1 : 0;
 }

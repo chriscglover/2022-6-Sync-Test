@@ -36,7 +36,7 @@ struct ComposerSettings {
     int           flashPeriodFrames = 50;   // 0 disables the flash and mute
     int           flashFrames = 1;
     std::int64_t  timecodeStartFrames = 0;  // timecode shown on frame 0
-    std::string   title = "ST 2022 TEST SIGNAL";
+    std::string   title = "VIDEO TEST SIGNAL";
     std::uint64_t runTag = 0;
 };
 
