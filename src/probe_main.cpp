@@ -22,6 +22,7 @@
 #include "probe/analyzer.h"
 #include "probe/sdi_capture.h"
 #include "probe/st2022_receiver.h"
+#include "version.h"
 
 using namespace pcapreplay;
 using namespace testsignal;
@@ -101,7 +102,7 @@ bool parseSpec(const std::string& text, int defaultPort, SourceSpec& spec, std::
 
 void usage() {
     std::printf(
-"probe - measure test-signal delay and lip sync\n"
+"probe %s - measure test-signal delay and lip sync\n"
 "\n"
 "usage: probe --source NAME=SPEC [--source NAME=SPEC ...] [options]\n"
 "\n"
@@ -124,11 +125,13 @@ void usage() {
 "  --interval S           seconds between reports (default 2)\n"
 "  --seconds N            stop after N seconds\n"
 "  --csv FILE             one row per frame and per mute, per source\n"
+"  --version              print the version and exit\n"
 "\n"
 "Delay is arrival at a source minus arrival of the same frame number at the\n"
 "reference, minus the source's offset. Lip sync is a source's tone mute minus\n"
 "its flash; positive means the audio is late. Everything is stamped on this\n"
-"machine's monotonic clock, so the sender's clock does not enter into it.\n");
+"machine's monotonic clock, so the sender's clock does not enter into it.\n",
+        kVersion);
 }
 
 }  // namespace
@@ -151,6 +154,7 @@ int main(int argc, char** argv) {
             return true;
         };
         if (a == "-h" || a == "--help") { usage(); return 0; }
+        else if (a == "--version") { std::printf("probe %s\n", kVersion); return 0; }
         else if (a == "--source") sourceArgs.push_back(val());
         else if (a == "--ref") refName = val();
         else if (a == "--offset") { if (!keyed(offsetArgs)) { std::printf("--offset wants NAME=FRAMES\n"); return 2; } }
@@ -191,6 +195,7 @@ int main(int argc, char** argv) {
     sigaction(SIGINT, &sa, nullptr);
     sigaction(SIGTERM, &sa, nullptr);
 
+    std::printf("probe %s\n", kVersion);
     Correlator correlator(refName, csv);
     struct Running {
         SourceSpec spec;

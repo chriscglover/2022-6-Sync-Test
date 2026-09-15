@@ -18,6 +18,7 @@
 #include "pcapreplay/nmos/nmos_node.h"
 #include "sdi_output.h"
 #include "sender.h"
+#include "version.h"
 #include "timecode.h"
 
 using namespace pcapreplay;
@@ -25,7 +26,6 @@ using namespace testsignal;
 
 namespace {
 
-constexpr const char* kVersion = "0.1.0";
 
 std::atomic<bool> g_stop{false};
 
@@ -163,6 +163,7 @@ void usage() {
 "  --interfaces           list this machine's NICs and exit\n"
 "  --formats              list the rasters and exit\n"
 "  --interval N           seconds between console reports (default 2, 0 = off)\n"
+"  --version              print the version and exit\n"
 "  -h, --help             this\n",
         kVersion);
 }
@@ -181,6 +182,7 @@ int main(int argc, char** argv) {
         const std::string a = argv[i];
         auto val = [&]() -> std::string { return i + 1 < argc ? argv[++i] : ""; };
         if      (a == "-h" || a == "--help") { usage(); return 0; }
+        else if (a == "--version")      { std::printf("sender %s\n", kVersion); return 0; }
         else if (a == "--formats")      return listFormats();
         else if (a == "--interfaces")   return listInterfaces();
         else if (a == "--format")       formatArg = val();

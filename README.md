@@ -250,6 +250,19 @@ each other on one machine.
   by its clock. The probe does not use it; its delays come from its own
   arrival stamps.
 
+## Releases
+
+**Version number:** it lives in one place, `src/version.h`, and both tools
+report it: `sender --version` and `probe --version`. The sender and the probe
+also print it when they start.
+
+**Tags:** releases are tagged `v<version>`, for example `v1.0.0`.
+
+**Release builds:** each GitHub release carries an x86-64 Linux build of both
+tools. The target machine needs the GStreamer runtime listed under
+[Build](#build) and a glibc at least as new as the one it was built against
+(Ubuntu 26.04, glibc 2.43).
+
 ## Licence
 
 MIT, see `LICENSE`.
