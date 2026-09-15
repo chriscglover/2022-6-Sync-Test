@@ -12,6 +12,15 @@ namespace {
 
 std::once_flag g_gstInit;
 
+// The DeckLink plugin stamps every captured buffer with the card's stream time.
+bool streamTime(GstBuffer* buffer, GstClockTime& out) {
+    static GstCaps* caps = gst_caps_from_string("timestamp/x-decklink-stream");
+    GstReferenceTimestampMeta* meta = gst_buffer_get_reference_timestamp_meta(buffer, caps);
+    if (!meta || !GST_CLOCK_TIME_IS_VALID(meta->timestamp)) return false;
+    out = meta->timestamp;
+    return true;
+}
+
 std::string busError(GstElement* pipeline) {
     if (!pipeline) return "no pipeline";
     GstBus* bus = gst_element_get_bus(pipeline);
@@ -152,6 +161,11 @@ void SdiCapture::pullVideo() {
         }
         const GstClockTime pts = GST_BUFFER_PTS(buffer);
         frame.arrivalNs = std::int64_t(gst_element_get_base_time(pipeline_) + pts);
+        GstClockTime stream = 0;
+        if (GST_CLOCK_TIME_IS_VALID(pts) && streamTime(buffer, stream)) {
+            streamToMonotonicNs_.store(frame.arrivalNs - std::int64_t(stream));
+            haveStreamOffset_.store(true);
+        }
         frame.fpsNum = GST_VIDEO_INFO_FPS_N(&info);
         frame.fpsDen = GST_VIDEO_INFO_FPS_D(&info);
         frame.interlaced = GST_VIDEO_INFO_IS_INTERLACED(&info);
@@ -191,7 +205,11 @@ void SdiCapture::pullAudio() {
                 block.samples[i] = float(double(v) / 2147483648.0);
             }
             block.rate = 48000;
-            block.startNs = std::int64_t(gst_element_get_base_time(pipeline_) + pts);
+            GstClockTime stream = 0;
+            if (haveStreamOffset_.load() && streamTime(buffer, stream))
+                block.startNs = std::int64_t(stream) + streamToMonotonicNs_.load();
+            else
+                block.startNs = std::int64_t(gst_element_get_base_time(pipeline_) + pts);
             gst_buffer_unmap(buffer, &map);
             {
                 std::lock_guard<std::mutex> lk(mutex_);

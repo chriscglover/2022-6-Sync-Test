@@ -45,6 +45,14 @@ private:
     void pullVideo();
     void pullAudio();
 
+    // Monotonic arrival minus the card's own stream time, from the latest video
+    // frame. Audio blocks are timed as stream time plus this, so audio and video
+    // share the card's timeline: GStreamer's audio timestamps count samples and
+    // drift against the card by its crystal error (about 100 ppm here), then
+    // resynchronise in frame-sized steps.
+    std::atomic<std::int64_t> streamToMonotonicNs_{0};
+    std::atomic<bool>         haveStreamOffset_{false};
+
     GstElement*       pipeline_ = nullptr;
     GstElement*       videoSink_ = nullptr;
     GstElement*       audioSinkElement_ = nullptr;
