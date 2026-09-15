@@ -43,18 +43,39 @@ Observation Analyzer::analyse(const LumaFrame& f) {
     // Locate the test picture from the first flash.
     if (!fixed_ && !calibrated_) {
         if (o.flashStart && prevW_ == f.width && prevH_ == f.height) {
-            int x0 = f.width, y0 = f.height, x1 = -1, y1 = -1;
+            // Count, per column and per row, the samples that jumped to bright.
+            // The test picture flashes across nearly its whole height and width
+            // (only its text boxes and marker stay dark); furniture beside it --
+            // meters, labels -- may change on the same frame but only in part of
+            // a column or row. Keep columns and rows with at least half the
+            // busiest one's count, so a bounding box cannot grow into them.
+            std::vector<int> columns(std::size_t(f.width), 0), rows(std::size_t(f.height), 0);
             for (int y = 0; y < f.height; y += 2) {
                 const std::uint8_t* cur = f.luma.data() + std::size_t(y) * std::size_t(f.width);
                 const std::uint8_t* old = prev_.data() + std::size_t(y) * std::size_t(f.width);
                 for (int x = 0; x < f.width; x += 2) {
                     if (int(cur[x]) - int(old[x]) > 80) {
-                        x0 = std::min(x0, x); x1 = std::max(x1, x);
-                        y0 = std::min(y0, y); y1 = std::max(y1, y);
+                        ++columns[std::size_t(x)];
+                        ++rows[std::size_t(y)];
                     }
                 }
             }
-            if (x1 > x0 && y1 > y0) {
+            auto span = [](const std::vector<int>& counts, int& first, int& last) {
+                const int peak = *std::max_element(counts.begin(), counts.end());
+                first = -1;
+                last = -1;
+                if (peak <= 0) return;
+                for (int i = 0; i < int(counts.size()); ++i) {
+                    if (counts[std::size_t(i)] * 2 >= peak) {
+                        if (first < 0) first = i;
+                        last = i;
+                    }
+                }
+            };
+            int x0, x1, y0, y1;
+            span(columns, x0, x1);
+            span(rows, y0, y1);
+            if (x0 >= 0 && y0 >= 0 && x1 > x0 && y1 > y0) {
                 // Round the sampled edges out to the 2-pixel grid they came from.
                 Region found{x0, y0, std::min(f.width, x1 + 2) - x0, std::min(f.height, y1 + 2) - y0};
                 if (std::int64_t(found.w) * found.h * 25 >= std::int64_t(f.width) * f.height) {

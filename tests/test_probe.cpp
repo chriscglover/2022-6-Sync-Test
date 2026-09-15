@@ -265,6 +265,15 @@ void testAnalyzer() {
         // Furniture outside the picture that does not flash: a bright meter column.
         for (int y = 100; y < 900; ++y)
             for (int x = 1700; x < 1760; ++x) placed[std::size_t(y) * w + x] = 180;
+        // Furniture that does change on the flash frame, but only in part of
+        // its columns and rows: meter segments lighting up beside the picture
+        // and a caption strip under it. The picture location must ignore both.
+        if (flash) {
+            for (int y = 300; y < 700; ++y)
+                for (int x = 1600; x < 1900; ++x) placed[std::size_t(y) * w + x] = 235;
+            for (int y = 920; y < 1000; ++y)
+                for (int x = 100; x < 700; ++x) placed[std::size_t(y) * w + x] = 235;
+        }
         LumaFrame f;
         f.width = w; f.height = h; f.luma = std::move(placed);
         f.fpsNum = 50; f.fpsDen = 1;
