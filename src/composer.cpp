@@ -74,6 +74,14 @@ std::string FrameComposer::timecodeTextFor(std::uint64_t frameIndex) const {
 std::span<const std::uint8_t> FrameComposer::compose(UyvyImage picture,
                                                      std::uint64_t frameIndex,
                                                      std::uint64_t captureUtcMs) {
+    drawPicture(picture, frameIndex, captureUtcMs);
+    audio_.embed(builder_, frameIndex, isFlash(frameIndex));
+    serialise(picture);
+    return {packed_.data(), packed_.size()};
+}
+
+void FrameComposer::drawPicture(UyvyImage picture, std::uint64_t frameIndex,
+                                std::uint64_t captureUtcMs) {
     const bool flash = isFlash(frameIndex);
     if (flash) fillFrame(picture, kWhiteY, kNeutralC, kNeutralC);
 
@@ -90,10 +98,6 @@ std::span<const std::uint8_t> FrameComposer::compose(UyvyImage picture,
     drawLabel(picture, y, h / 180, detailText_);
 
     drawMarker(picture, settings_.runTag, std::uint32_t(frameIndex), captureUtcMs);
-
-    audio_.embed(builder_, frameIndex, flash);
-    serialise(picture);
-    return {packed_.data(), packed_.size()};
 }
 
 void FrameComposer::serialise(UyvyImage picture) {

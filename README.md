@@ -3,8 +3,8 @@
 Two command-line tools for measuring video delay and lip sync through anything
 that carries SMPTE ST 2022-6/-7 or SDI:
 
-- **`st2022_testsignal`** sends a test signal as ST 2022-6, or as ST 2022-7
-  over two paths.
+- **`st2022_testsignal`** sends a test signal as ST 2022-6, as ST 2022-7 over
+  two paths, or as SDI from a Blackmagic DeckLink.
 - **`st2022_delayprobe`** receives it from ST 2022-6/-7 or a Blackmagic DeckLink
   SDI input. It reports how late each frame arrives compared with a reference
   point, and how far the audio is from the video.
@@ -62,8 +62,7 @@ make test          # composes, sends and receives in memory; no network needed
 sudo make install  # optional, to /usr/local/bin
 ```
 
-For DeckLink capture, the probe also needs Blackmagic Desktop Video and the
-GStreamer `decklink` plugin (`gstreamer1.0-plugins-bad`).
+For DeckLink output and capture, see [Blackmagic DeckLink](#blackmagic-decklink).
 
 On another machine the binaries need only the GStreamer runtime
 (`libgstreamer1.0-0` and `gstreamer1.0-plugins-base`); the C++ runtime is
@@ -102,6 +101,24 @@ st2022_testsignal --format 1080p50 --flash-every 1 --audio-groups 2 \
 
 `--formats` lists the rasters. Interlaced formats accept either rate spelling
 (`1080i50` or `1080i25`).
+
+### SDI output
+
+```bash
+# the same test signal out of DeckLink device 0 as 1080i50 SDI
+st2022_testsignal --format 1080i50 --sdi 0
+```
+
+`--sdi N` sends to DeckLink device N instead of the network.
+
+- **Signal:** the picture, tone, flash and mute are the same as on the network.
+  The tone goes out on 8 channels, or 16 with `--audio-groups` above 2.
+- **A/V timing:** each frame's picture and its audio samples carry matching
+  timestamps, so the flash and the mute leave the card together.
+- **Clocking:** the card's clock paces the output; there is no software pacer on
+  this path.
+- **Modes:** every format has a DeckLink mode except 1080PsF25.
+- **NMOS:** `--sdi` cannot be combined with `--nmos`.
 
 A console line every two seconds reports:
 
@@ -168,6 +185,48 @@ off, and the merge locks to one RTP SSRC. This matters on a host where other
 receivers use the same port: Linux otherwise hands every joined group to every
 socket on that port.
 
+## Blackmagic DeckLink
+
+Neither tool contains, links or ships any Blackmagic code or SDK. DeckLink
+output (`st2022_testsignal --sdi`) and capture (`st2022_delayprobe`
+`sdi:` sources) both go through GStreamer's `decklink` plugin. That plugin
+loads Blackmagic's driver library while it runs.
+
+**What to install:**
+
+1. **Blackmagic Desktop Video**, from Blackmagic Design's support site. It
+   installs the DeckLink kernel driver and the runtime library
+   `libDeckLinkAPI.so`; on Debian and Ubuntu the package is `desktopvideo`,
+   which puts the library at `/usr/lib/libDeckLinkAPI.so`.
+2. **GStreamer's `decklink` plugin**, in `gstreamer1.0-plugins-bad` on Debian
+   and Ubuntu.
+
+**Where the library is looked for:** the plugin loads `libDeckLinkAPI.so` by
+name when a DeckLink element starts, not when the tools start. The system's
+normal library search applies:
+
+- `LD_LIBRARY_PATH`;
+- the `ld.so` cache (`/etc/ld.so.conf`, refreshed with `ldconfig`);
+- `/lib` and `/usr/lib`.
+
+If Desktop Video put the library somewhere else, add that directory to
+`LD_LIBRARY_PATH` or to `/etc/ld.so.conf.d/` and run `ldconfig`.
+
+**Checking the installation:**
+
+```bash
+ls -l /usr/lib/libDeckLinkAPI.so          # or wherever Desktop Video put it
+gst-inspect-1.0 decklinkvideosink         # the plugin is present
+gst-inspect-1.0 decklinkvideosrc
+```
+
+Without the library, the network sender and receiver still work; only `--sdi`
+and `sdi:` sources fail to start, and they say why.
+
+A DeckLink can drive an output and capture an input at the same time, so a
+card with both connectors, looped back, lets the sender and the probe check
+each other on one machine.
+
 ## Limits and open points
 
 - **ST 299-1 ECC** is BCH(31,25) per bit plane, with generator
@@ -178,6 +237,10 @@ socket on that port.
 - **Timing is internal:** the sender is not PTP-locked. The HBRMT R field is 3.
 - **Interlaced motion:** interlaced frames carry the same picture in both fields,
   so the ball moves once per frame, not once per field.
+- **SD markers over SDI:** at 625 and 525 lines each marker cell is only 2
+  pixels. SDI's chroma filtering often blurs it past decoding: a DeckLink
+  loopback read the marker on 23 of 296 625i50 frames. Flash-to-flash delay and
+  lip sync are unaffected, and HD markers decode on every frame.
 - **The marker time** is when the frame was due to leave the sending machine,
   by its clock. The probe does not use it; its delays come from its own
   arrival stamps.

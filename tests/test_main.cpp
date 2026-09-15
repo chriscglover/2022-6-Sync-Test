@@ -16,6 +16,7 @@
 
 #include "audio_embed.h"
 #include "composer.h"
+#include "decklink_modes.h"
 #include "overlay.h"
 #include "pcapreplay/bitpack.h"
 #include "pcapreplay/crc.h"
@@ -240,6 +241,24 @@ void testMarkerPayload() {
     CHECK(std::memcmp(p.data(), expected, 24) == 0);
 }
 
+void testDeckLinkModes() {
+    std::printf("DeckLink modes\n");
+    const DeckLinkMode* m = deckLinkModeFor(SdiFormat::HD1080i25);
+    CHECK(m && std::string(m->nick) == "1080i50" && m->fieldOrder && std::string(m->fieldOrder) == "top-field-first");
+    m = deckLinkModeFor(SdiFormat::HD1080p5994);
+    CHECK(m && std::string(m->nick) == "1080p5994" && m->fieldOrder == nullptr);
+    m = deckLinkModeFor(SdiFormat::SD525i2997);
+    CHECK(m && std::string(m->nick) == "ntsc" && std::string(m->fieldOrder) == "bottom-field-first" &&
+          std::string(m->pixelAspect) == "10/11");
+    CHECK(deckLinkModeFor(SdiFormat::HD1080psf25) == nullptr);
+    // Every other format the sender offers has a mode.
+    int missing = 0;
+    for (const auto& fi : allFormats())
+        if (fi.id != SdiFormat::HD1080psf25 && !deckLinkModeFor(fi.id)) ++missing;
+    CHECK(missing == 0);
+    CHECK(deckLinkAudioChannels(1) == 8 && deckLinkAudioChannels(3) == 16);
+}
+
 void testChannelStatus() {
     std::printf("channel status\n");
     const auto cs = professionalChannelStatus(24);
@@ -318,6 +337,7 @@ int main() {
     testTimecode();
     testMarkerPayload();
     testChannelStatus();
+    testDeckLinkModes();
     testFormat(SdiFormat::HD1080i25, 3, 1);
     testFormat(SdiFormat::HD1080p50, 4, 4);
     testFormat(SdiFormat::HD1080i2997, 3, 2);

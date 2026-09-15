@@ -53,7 +53,7 @@ AVX2_SRC := $(PCR)/common/src/bitpack_avx2.cpp
 # Picture, audio and raster composition: everything the self-tests exercise.
 LIB_SRC  := src/timecode.cpp src/overlay.cpp src/audio_embed.cpp src/composer.cpp
 # Needs GStreamer and the network.
-APP_SRC  := src/picture_source.cpp src/sender.cpp src/main.cpp
+APP_SRC  := src/picture_source.cpp src/sender.cpp src/sdi_output.cpp src/main.cpp
 TEST_SRC := tests/test_main.cpp
 
 # The delay probe: receive, locate, decode and correlate (testable) ...
@@ -105,6 +105,10 @@ $(PROBE_TEST_TARGET): $(PROBE_TEST_OBJ) $(PROBE_LIB_OBJ) $(LIB_OBJ) $(PCR_OBJ) $
 test: $(TEST_TARGET) $(PROBE_TEST_TARGET)
 	$(TEST_TARGET)
 	$(PROBE_TEST_TARGET)
+
+$(BUILD)/obj/src/sdi_output.o: src/sdi_output.cpp
+	@mkdir -p $(dir $@)
+	$(CXX) $(CXXSTD) $(WARN) $(CXXFLAGS) $(INCLUDES) $(GST_CFLAGS) -MMD -MP -c $< -o $@
 
 $(BUILD)/obj/src/probe/sdi_capture.o: src/probe/sdi_capture.cpp
 	@mkdir -p $(dir $@)

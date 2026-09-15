@@ -63,6 +63,11 @@ public:
     bool        isFlash(std::uint64_t frameIndex) const;
     std::string timecodeTextFor(std::uint64_t frameIndex) const;
 
+    // Draws the flash, the text and the marker for `frameIndex` into `picture`
+    // (active-picture UYVY). compose() does this first; an SDI output needs
+    // only this.
+    void drawPicture(UyvyImage picture, std::uint64_t frameIndex, std::uint64_t captureUtcMs);
+
     // Draws into `picture` (active-picture UYVY) and returns the packed frame,
     // valid until the next call.
     std::span<const std::uint8_t> compose(UyvyImage picture, std::uint64_t frameIndex,

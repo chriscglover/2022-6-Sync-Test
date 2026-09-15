@@ -16,6 +16,7 @@
 #include "pcapreplay/net_interfaces.h"
 #include "pcapreplay/net_multicast.h"
 #include "pcapreplay/nmos/nmos_node.h"
+#include "sdi_output.h"
 #include "sender.h"
 #include "timecode.h"
 
@@ -141,6 +142,12 @@ void usage() {
 "  --no-loopback          do not deliver to receivers on this machine\n"
 "  --seconds N            stop after N seconds      (default: run until killed)\n"
 "\n"
+"SDI output\n"
+"  --sdi N                send to Blackmagic DeckLink device N instead of the\n"
+"                         network, with the same picture, tone and sync pulse.\n"
+"                         Needs Blackmagic Desktop Video and the GStreamer\n"
+"                         decklink plugin (see README); not with --nmos\n"
+"\n"
 "NMOS\n"
 "  --nmos                 register as an IS-04 sender and serve IS-05\n"
 "  --nmos-port N          node API port             (default 3210)\n"
@@ -165,7 +172,7 @@ int main(int argc, char** argv) {
     std::string formatArg = "1080i50", groupB, ifaceArg, ifaceBArg, nmosIfaceArg;
     std::string label = "ST 2022 test signal", registry, tcStart;
     double flashEvery = 2.0, reportInterval = 2.0;
-    int port = 40000, nmosPort = 3210;
+    int port = 40000, nmosPort = 3210, sdiDevice = -1;
     bool wantNmos = false, peerToPeer = true, idle = false, haveRunTag = false;
 
     for (int i = 1; i < argc; ++i) {
@@ -191,6 +198,7 @@ int main(int argc, char** argv) {
         else if (a == "--ttl")          cfg.ttl = std::atoi(val().c_str());
         else if (a == "--no-loopback")  cfg.loopback = false;
         else if (a == "--seconds")      cfg.maxSeconds = std::atof(val().c_str());
+        else if (a == "--sdi")          sdiDevice = std::atoi(val().c_str());
         else if (a == "--nmos")         wantNmos = true;
         else if (a == "--nmos-port")    nmosPort = std::atoi(val().c_str());
         else if (a == "--nmos-iface")   nmosIfaceArg = val();
@@ -247,6 +255,57 @@ int main(int argc, char** argv) {
     if (!haveRunTag) {
         std::random_device rd;
         cfg.composer.runTag = (std::uint64_t(rd()) << 32) ^ rd();
+    }
+
+    // ---- DeckLink SDI output ------------------------------------------------
+    if (sdiDevice >= 0) {
+        if (wantNmos) {
+            std::printf("--sdi and --nmos cannot be combined: NMOS describes a network sender\n");
+            return 2;
+        }
+        SdiOutputConfig sdi;
+        sdi.composer = cfg.composer;
+        sdi.timecodeFromTimeOfDay = cfg.timecodeFromTimeOfDay;
+        sdi.device = sdiDevice;
+        sdi.maxSeconds = cfg.maxSeconds;
+
+        std::printf("st2022_testsignal %s\n", kVersion);
+        std::printf("format     : %s\n", formatDescription(fi.id).c_str());
+        std::printf("audio      : %d group(s) of tone, %.0f Hz at %.1f dBFS\n", cfg.composer.audio.groups,
+                    cfg.composer.audio.toneHz, cfg.composer.audio.levelDbfs);
+        if (cfg.composer.flashPeriodFrames > 0)
+            std::printf("sync pulse : white flash + mute for %d frame(s) every %d frames\n",
+                        cfg.composer.flashFrames, cfg.composer.flashPeriodFrames);
+
+        SdiOutput output;
+        std::string error;
+        if (!output.start(sdi, error)) {
+            std::printf("error: %s\n", error.c_str());
+            return 1;
+        }
+        const SdiOutputStatus first = output.status();
+        std::printf("output     : DeckLink %d, mode %s, %d audio channels\n\n", sdiDevice, first.mode.c_str(),
+                    first.audioChannels);
+
+        const auto t0 = std::chrono::steady_clock::now();
+        double lastReport = -1.0;
+        int exitCode = 0;
+        for (;;) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(250));
+            if (g_stop.load(std::memory_order_relaxed)) { std::printf("\nstopping\n"); break; }
+            const SdiOutputStatus s = output.status();
+            if (!s.error.empty()) { std::printf("error: %s\n", s.error.c_str()); exitCode = 1; break; }
+            if (s.completed) break;
+            const double elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+            if (reportInterval > 0.0 && elapsed - lastReport >= reportInterval) {
+                lastReport = elapsed;
+                std::printf("%8.1fs  %s  frame %llu\n", elapsed, s.timecode.c_str(),
+                            static_cast<unsigned long long>(s.framesSent));
+                std::fflush(stdout);
+            }
+        }
+        output.stop();
+        return exitCode;
     }
 
     std::string ifaceError;
