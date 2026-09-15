@@ -3,9 +3,9 @@
 Two command-line tools for measuring video delay and lip sync through anything
 that carries SMPTE ST 2022-6/-7 or SDI:
 
-- **`st2022_testsignal`** sends a test signal as ST 2022-6, as ST 2022-7 over
+- **`sender`** sends a test signal as ST 2022-6, as ST 2022-7 over
   two paths, or as SDI from a Blackmagic DeckLink.
-- **`st2022_delayprobe`** receives it from ST 2022-6/-7 or a Blackmagic DeckLink
+- **`probe`** receives it from ST 2022-6/-7 or a Blackmagic DeckLink
   SDI input. It reports how late each frame arrives compared with a reference
   point, and how far the audio is from the video.
 
@@ -79,7 +79,7 @@ see `third_party/pcapreplay/VENDORED.md`.
 For line-rate pacing, allow real-time priority and a full send buffer:
 
 ```bash
-sudo setcap cap_sys_nice=eip build/bin/st2022_testsignal
+sudo setcap cap_sys_nice=eip build/bin/sender
 sudo sysctl -w net.core.wmem_max=8388608
 ```
 
@@ -87,20 +87,20 @@ sudo sysctl -w net.core.wmem_max=8388608
 
 ```bash
 # which NIC?
-st2022_testsignal --interfaces
+sender --interfaces
 
 # 1080i50, ST 2022-7 on two NICs
-st2022_testsignal --format 1080i50 \
+sender --format 1080i50 \
     --iface eth1 --group 239.10.1.1 \
     --iface-b eth2 --group-b 239.10.2.1 --port 40000
 
 # the same, registered with NMOS so a controller can route it
-st2022_testsignal --format 1080i50 --iface eth1 --group 239.10.1.1 \
+sender --format 1080i50 --iface eth1 --group 239.10.1.1 \
     --iface-b eth2 --group-b 239.10.2.1 --nmos --nmos-iface eth0 \
     --label "Test signal 1080i50"
 
 # 1080p50, flash every second, two groups of audio
-st2022_testsignal --format 1080p50 --flash-every 1 --audio-groups 2 \
+sender --format 1080p50 --flash-every 1 --audio-groups 2 \
     --iface eth1 --group 239.10.1.1
 ```
 
@@ -111,7 +111,7 @@ st2022_testsignal --format 1080p50 --flash-every 1 --audio-groups 2 \
 
 ```bash
 # the same test signal out of DeckLink device 0 as 1080i50 SDI
-st2022_testsignal --format 1080i50 --sdi 0
+sender --format 1080i50 --sdi 0
 ```
 
 `--sdi N` sends to DeckLink device N instead of the network.
@@ -141,7 +141,7 @@ every later frame's marker time by one frame.
 same `--nmos-port` to keep a controller's existing route. If that port is still
 held, the node moves to the next free one and its sender gets a new ID.
 
-## Receiving: st2022_delayprobe
+## Receiving: probe
 
 Run it on a machine that can see the points you want to compare. It stamps
 every frame's arrival on that machine's monotonic clock, so the sender's clock
@@ -149,10 +149,10 @@ does not enter into it.
 
 ```bash
 # lip sync of the sender alone, received directly
-st2022_delayprobe --source tx=st2022:239.10.1.1@eth1,239.10.2.1@eth2
+probe --source tx=st2022:239.10.1.1@eth1,239.10.2.1@eth2
 
 # delay through a system: its ST 2022-6 input against its SDI output on a DeckLink
-st2022_delayprobe --source in=st2022:239.10.1.1@eth1,239.10.2.1@eth2 \
+probe --source in=st2022:239.10.1.1@eth1,239.10.2.1@eth2 \
                   --source out=sdi:0 --offset out=2 \
                   --interval 5 --csv delay.csv
 ```
@@ -193,7 +193,7 @@ socket on that port.
 ## Blackmagic DeckLink
 
 Neither tool contains, links or ships any Blackmagic code or SDK. DeckLink
-output (`st2022_testsignal --sdi`) and capture (`st2022_delayprobe`
+output (`sender --sdi`) and capture (`probe`
 `sdi:` sources) both go through GStreamer's `decklink` plugin. That plugin
 loads Blackmagic's driver library while it runs.
 

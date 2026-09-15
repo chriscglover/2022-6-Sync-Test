@@ -1,6 +1,6 @@
 # Linux build: `make`, a C++20 compiler and the GStreamer development packages.
 #
-#   make            release build -> build/bin/st2022_testsignal
+#   make            release build -> build/bin/sender
 #   make -j         ... in parallel
 #   make test       build and run the self-tests (no network, no GStreamer)
 #   make install    to $(PREFIX)/bin, default /usr/local
@@ -75,10 +75,10 @@ PROBE_TEST_OBJ := $(call obj,$(PROBE_TEST_SRC))
 DEPS     := $(patsubst %.o,%.d,$(PCR_OBJ) $(AVX2_OBJ) $(LIB_OBJ) $(APP_OBJ) $(TEST_OBJ) \
               $(PROBE_LIB_OBJ) $(PROBE_APP_OBJ) $(PROBE_TEST_OBJ))
 
-TARGET            := $(BUILD)/bin/st2022_testsignal
-PROBE_TARGET      := $(BUILD)/bin/st2022_delayprobe
-TEST_TARGET       := $(BUILD)/bin/testsignal_tests
-PROBE_TEST_TARGET := $(BUILD)/bin/delayprobe_tests
+TARGET            := $(BUILD)/bin/sender
+PROBE_TARGET      := $(BUILD)/bin/probe
+TEST_TARGET       := $(BUILD)/bin/sender_tests
+PROBE_TEST_TARGET := $(BUILD)/bin/probe_tests
 
 .PHONY: all test clean install
 
@@ -129,11 +129,11 @@ $(BUILD)/obj/%.o: %.cpp
 	$(CXX) $(CXXSTD) $(WARN) $(CXXFLAGS) $(INCLUDES) -MMD -MP -c $< -o $@
 
 install: $(TARGET)
-	install -Dm755 $(TARGET) $(DESTDIR)$(PREFIX)/bin/st2022_testsignal
-	@echo "installed $(DESTDIR)$(PREFIX)/bin/st2022_testsignal"
+	install -Dm755 $(TARGET) $(DESTDIR)$(PREFIX)/bin/sender
+	@echo "installed $(DESTDIR)$(PREFIX)/bin/sender"
 	@echo
 	@echo "Optional, for real-time packet pacing without running as root:"
-	@echo "    sudo setcap cap_sys_nice=eip $(DESTDIR)$(PREFIX)/bin/st2022_testsignal"
+	@echo "    sudo setcap cap_sys_nice=eip $(DESTDIR)$(PREFIX)/bin/sender"
 
 clean:
 	rm -rf $(BUILD)

@@ -1,4 +1,4 @@
-// Self-tests for st2022_delayprobe: marker decoding at native and scaled
+// Self-tests for probe: marker decoding at native and scaled
 // positions, ST 2022-7 merging with loss, duplication and reordering on both
 // legs, picture location from a flash, embedded-audio recovery and mute
 // timing, and the delay and lip-sync arithmetic.

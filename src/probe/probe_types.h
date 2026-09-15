@@ -1,4 +1,4 @@
-// Shared vocabulary for st2022_delayprobe: what a source delivers, reduced to
+// Shared vocabulary for probe: what a source delivers, reduced to
 // what the analysis needs, stamped with when it arrived.
 #pragma once
 

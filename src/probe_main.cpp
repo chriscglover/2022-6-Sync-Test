@@ -1,9 +1,9 @@
-// st2022_delayprobe -- measure how long the test signal takes to get from one
+// probe -- measure how long the test signal takes to get from one
 // point to another, by matching frame numbers (and flashes) between sources,
 // and the lip sync of each source, by pairing its flash with its tone mute.
 //
-//   st2022_delayprobe --source in=st2022:239.1.5.5@eth1,239.2.5.5@eth2
-//                     --source out=sdi:0 --offset out=2
+//   probe --source in=st2022:239.1.5.5@eth1,239.2.5.5@eth2
+//         --source out=sdi:0 --offset out=2
 #include <atomic>
 #include <chrono>
 #include <csignal>
@@ -101,9 +101,9 @@ bool parseSpec(const std::string& text, int defaultPort, SourceSpec& spec, std::
 
 void usage() {
     std::printf(
-"st2022_delayprobe - measure test-signal delay and lip sync\n"
+"probe - measure test-signal delay and lip sync\n"
 "\n"
-"usage: st2022_delayprobe --source NAME=SPEC [--source NAME=SPEC ...] [options]\n"
+"usage: probe --source NAME=SPEC [--source NAME=SPEC ...] [options]\n"
 "\n"
 "With one source it reports that source's lip sync. With two or more it also\n"
 "reports each source's delay from the reference.\n"

@@ -1,4 +1,4 @@
-// st2022_testsignal -- a moving-ball, burnt-in-timecode ST 2022-6/-7 test signal
+// sender -- a moving-ball, burnt-in-timecode ST 2022-6/-7 test signal
 // with 1 kHz tone and a flash/mute sync pulse, for measuring delay through a
 // receiving system. It only sends; it measures nothing.
 #include <atomic>
@@ -110,10 +110,10 @@ std::string resolveIface(const std::string& given, std::string& error) {
 
 void usage() {
     std::printf(
-"st2022_testsignal %s - ST 2022-6/-7 delay and A/V sync test signal\n"
+"sender %s - ST 2022-6/-7 delay and A/V sync test signal\n"
 "\n"
-"usage: st2022_testsignal [options]\n"
-"       st2022_testsignal --formats | --interfaces\n"
+"usage: sender [options]\n"
+"       sender --formats | --interfaces\n"
 "\n"
 "Picture: a moving ball with the title, burnt-in timecode and frame number, and\n"
 "a machine-readable frame marker in the bottom-left corner. Every --flash-every seconds\n"
@@ -276,7 +276,7 @@ int main(int argc, char** argv) {
         sdi.device = sdiDevice;
         sdi.maxSeconds = cfg.maxSeconds;
 
-        std::printf("st2022_testsignal %s\n", kVersion);
+        std::printf("sender %s\n", kVersion);
         std::printf("format     : %s\n", formatDescription(fi.id).c_str());
         std::printf("audio      : %d group(s) of tone, %.0f Hz, channel 1 at %.1f dBFS, %g dB lower per channel\n",
                     cfg.composer.audio.groups, cfg.composer.audio.toneHz, cfg.composer.audio.levelDbfs,
@@ -344,7 +344,7 @@ int main(int argc, char** argv) {
     }
 
     WinsockScope sockets;
-    std::printf("st2022_testsignal %s\n", kVersion);
+    std::printf("sender %s\n", kVersion);
     std::printf("format     : %s\n", formatDescription(fi.id).c_str());
     std::printf("audio      : %d group(s), %.0f Hz, channel 1 at %.1f dBFS, %g dB lower per channel\n",
                 cfg.composer.audio.groups, cfg.composer.audio.toneHz, cfg.composer.audio.levelDbfs,
