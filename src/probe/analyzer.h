@@ -45,6 +45,9 @@ struct Observation {
     std::uint64_t runTag = 0;
     bool          flash = false;
     bool          flashStart = false;
+    // When the flash began. On an interlaced frame whose earlier field is dark
+    // and later field bright, that is half a frame after the frame arrived.
+    std::int64_t  flashNs = 0;
     double        meanLuma = 0.0;
     double        framePeriodNs = 0.0;
 };

@@ -22,6 +22,7 @@ struct LumaFrame {
     int fpsNum = 0;
     int fpsDen = 1;
     bool interlaced = false;
+    bool bottomFieldFirst = false;    // interlaced: the odd rows are the earlier field
     std::string format;               // e.g. "1080i25 (1080i50)" or "1920x1080p50 v210"
 };
 

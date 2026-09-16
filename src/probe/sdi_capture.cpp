@@ -169,6 +169,9 @@ void SdiCapture::pullVideo() {
         frame.fpsNum = GST_VIDEO_INFO_FPS_N(&info);
         frame.fpsDen = GST_VIDEO_INFO_FPS_D(&info);
         frame.interlaced = GST_VIDEO_INFO_IS_INTERLACED(&info);
+        frame.bottomFieldFirst = frame.interlaced &&
+            (GST_VIDEO_INFO_FIELD_ORDER(&info) == GST_VIDEO_FIELD_ORDER_BOTTOM_FIELD_FIRST ||
+             (GST_VIDEO_INFO_FIELD_ORDER(&info) == GST_VIDEO_FIELD_ORDER_UNKNOWN && h <= 486));
         frame.format = std::to_string(w) + "x" + std::to_string(h) + (frame.interlaced ? "i" : "p") +
                        std::to_string(frame.fpsDen ? (frame.fpsNum + frame.fpsDen / 2) / frame.fpsDen : 0) +
                        " " + gst_video_format_to_string(fmt);

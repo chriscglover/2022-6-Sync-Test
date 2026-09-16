@@ -229,6 +229,7 @@ bool extractLuma(const PackedFrame& packed, LumaFrame& out, std::string& problem
     out.fpsNum = fi.frameRateNum;
     out.fpsDen = fi.frameRateDen;
     out.interlaced = fi.interlacedOnWire();
+    out.bottomFieldFirst = out.interlaced && fi.totalLines == 525;
     out.format = fi.name;
 
     std::vector<std::uint16_t> words(static_cast<std::size_t>(aw));

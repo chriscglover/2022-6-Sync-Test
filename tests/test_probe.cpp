@@ -293,6 +293,58 @@ void testAnalyzer() {
     CHECK(after.frameNumber == 11 && after.runTag == 99);
 }
 
+void testAnalyzerInterlacedFlash() {
+    std::printf("analyzer: a flash starting on the later field is dated from that field\n");
+    const int w = 1920, h = 1080;
+    // Flash rows lit per frame: 0 none, 1 odd, 2 even, 3 both.
+    auto frameFor = [&](int k, int lit, bool bff) {
+        LumaFrame f;
+        f.width = w; f.height = h; f.interlaced = true; f.bottomFieldFirst = bff;
+        f.fpsNum = 25; f.fpsDen = 1;
+        f.arrivalNs = std::int64_t(k) * 40'000'000;
+        f.luma.assign(std::size_t(w) * h, 40);
+        for (int y = 24; y < 24 + 864; ++y) {
+            const bool on = (lit == 3) || (lit == 1 && (y & 1)) || (lit == 2 && !(y & 1));
+            if (on)
+                for (int x = 24; x < 24 + 1536; ++x) f.luma[std::size_t(y) * w + x] = 235;
+        }
+        return f;
+    };
+    for (const bool bff : {false, true}) {
+        Analyzer a;
+        a.setSourceRaster(w, h);
+        for (int k = 0; k < 10; ++k) CHECK(!a.analyse(frameFor(k, 0, bff)).flash);
+        // The later field of frame 10 and the earlier field of frame 11.
+        const int later = bff ? 2 : 1, earlier = bff ? 1 : 2;
+        const Observation first = a.analyse(frameFor(10, later, bff));
+        CHECK(first.flash && first.flashStart);
+        CHECK(first.flashNs == 10 * 40'000'000LL + 20'000'000);
+        const Observation second = a.analyse(frameFor(11, earlier, bff));
+        CHECK(second.flash && !second.flashStart);
+        CHECK(!a.analyse(frameFor(12, 0, bff)).flash);
+        const Region r = a.region();
+        CHECK(a.regionFromFlash());
+        CHECK(std::abs(r.x - 24) <= 2 && std::abs(r.y - 24) <= 2);
+        CHECK(std::abs(r.w - 1536) <= 3 && std::abs(r.h - 864) <= 3);
+        // A flash lighting both fields of one frame starts with that frame.
+        for (int k = 13; k < 60; ++k) a.analyse(frameFor(k, 0, bff));
+        const Observation whole = a.analyse(frameFor(60, 3, bff));
+        CHECK(whole.flashStart && whole.flashNs == 60 * 40'000'000LL);
+    }
+
+    // Lip sync is measured from the field the flash began on.
+    Correlator solo("", nullptr);
+    Observation f;
+    f.arrivalNs = 1'000'000'000;
+    f.flashNs = 1'020'000'000;
+    f.flashStart = true;
+    f.framePeriodNs = 40e6;
+    solo.observe("out", f, 0);
+    solo.observeMute("out", 1'020'000'000);
+    const auto lines = solo.report();
+    CHECK(lines.size() == 1 && lines[0].find("lip sync +0.0 ms") != std::string::npos);
+}
+
 void testCorrelator() {
     std::printf("correlator: delay and lip sync\n");
     Correlator c("in", nullptr);
@@ -367,6 +419,7 @@ int main() {
     testAudio(SdiFormat::HD1080i2997);
     testAudio(SdiFormat::SD625i25);
     testAnalyzer();
+    testAnalyzerInterlacedFlash();
     testCorrelator();
     std::printf("\n%d checks, %d failed\n", g_checks, g_failures);
     return g_failures ? 1 : 0;

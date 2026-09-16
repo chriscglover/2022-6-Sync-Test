@@ -28,17 +28,42 @@ Observation Analyzer::analyse(const LumaFrame& f) {
     r.w = std::min(r.w, f.width - r.x);
     r.h = std::min(r.h, f.height - r.y);
 
-    std::uint64_t sum = 0, count = 0;
-    for (int y = r.y; y < r.y + r.h; y += 4) {
+    // Every third row, so both fields of an interlaced frame are sampled. A
+    // flash that starts on a field boundary other than the frame's lights only
+    // the later field of one frame and the earlier field of the next; judged on
+    // one field, or on the whole frame, it would be dated a field wrong.
+    std::uint64_t sum[2] = {0, 0}, count[2] = {0, 0};
+    for (int y = r.y; y < r.y + r.h; y += 3) {
         const std::uint8_t* row = f.luma.data() + std::size_t(y) * std::size_t(f.width);
-        for (int x = r.x; x < r.x + r.w; x += 4) { sum += row[x]; ++count; }
+        for (int x = r.x; x < r.x + r.w; x += 4) { sum[y & 1] += row[x]; ++count[y & 1]; }
     }
-    o.meanLuma = count ? double(sum) / double(count) : 0.0;
+    const auto mean = [&](int parity) {
+        return count[parity] ? double(sum[parity]) / double(count[parity]) : 0.0;
+    };
+    const std::uint64_t allCount = count[0] + count[1];
+    o.meanLuma = allCount ? double(sum[0] + sum[1]) / double(allCount) : 0.0;
     if (baseline_ < 0.0) baseline_ = o.meanLuma;
-    o.flash = o.meanLuma > std::max(90.0, baseline_ + 60.0);
+    const double threshold = std::max(90.0, baseline_ + 60.0);
+    if (f.interlaced) {
+        const int earlier = f.bottomFieldFirst ? 1 : 0;
+        const bool earlyBright = mean(earlier) > threshold;
+        const bool lateBright = mean(1 - earlier) > threshold;
+        o.flash = earlyBright || lateBright;
+        if (earlyBright && !prevFlash_) {
+            o.flashStart = true;
+            o.flashNs = f.arrivalNs;
+        } else if (!earlyBright && lateBright) {
+            o.flashStart = true;
+            o.flashNs = f.arrivalNs + std::int64_t(std::llround(o.framePeriodNs / 2.0));
+        }
+        prevFlash_ = lateBright;
+    } else {
+        o.flash = o.meanLuma > threshold;
+        o.flashStart = o.flash && !prevFlash_;
+        if (o.flashStart) o.flashNs = f.arrivalNs;
+        prevFlash_ = o.flash;
+    }
     if (!o.flash) baseline_ = baseline_ * 0.95 + o.meanLuma * 0.05;
-    o.flashStart = o.flash && !prevFlash_;
-    prevFlash_ = o.flash;
 
     // Locate the test picture from the first flash.
     if (!fixed_ && !calibrated_) {
@@ -50,7 +75,8 @@ Observation Analyzer::analyse(const LumaFrame& f) {
             // a column or row. Keep columns and rows with at least half the
             // busiest one's count, so a bounding box cannot grow into them.
             std::vector<int> columns(std::size_t(f.width), 0), rows(std::size_t(f.height), 0);
-            for (int y = 0; y < f.height; y += 2) {
+            // Every row: a flash starting mid-frame changes only one field.
+            for (int y = 0; y < f.height; ++y) {
                 const std::uint8_t* cur = f.luma.data() + std::size_t(y) * std::size_t(f.width);
                 const std::uint8_t* old = prev_.data() + std::size_t(y) * std::size_t(f.width);
                 for (int x = 0; x < f.width; x += 2) {
@@ -75,6 +101,8 @@ Observation Analyzer::analyse(const LumaFrame& f) {
             int x0, x1, y0, y1;
             span(columns, x0, x1);
             span(rows, y0, y1);
+            y0 &= ~1;
+            y1 |= 1;
             if (x0 >= 0 && y0 >= 0 && x1 > x0 && y1 > y0) {
                 // Round the sampled edges out to the 2-pixel grid they came from.
                 Region found{x0, y0, std::min(f.width, x1 + 2) - x0, std::min(f.height, y1 + 2) - y0};
@@ -103,6 +131,11 @@ Observation Analyzer::analyse(const LumaFrame& f) {
         o.runTag = m.runTag;
     }
     return o;
+}
+
+// An Observation built without a flash time (a test's, say) flashed as its frame arrived.
+static std::int64_t flashTime(const Observation& o) {
+    return o.flashNs ? o.flashNs : o.arrivalNs;
 }
 
 // ---- MuteDetector -----------------------------------------------------------
@@ -214,12 +247,13 @@ void Correlator::observe(const std::string& source, const Observation& o, double
             }
         }
         if (o.flashStart) {
+            const std::int64_t flashAt = flashTime(o);
             // The most recent reference flash at or before this one, within 2 s.
             const auto ref = sources_.find(reference_);
             if (ref != sources_.end()) {
                 for (auto it = ref->second.flashes.rbegin(); it != ref->second.flashes.rend(); ++it) {
-                    if (*it <= o.arrivalNs && o.arrivalNs - *it < 2'000'000'000) {
-                        flashDelayMs = (double(o.arrivalNs - *it) - offsetNs) / 1e6;
+                    if (*it <= flashAt && flashAt - *it < 2'000'000'000) {
+                        flashDelayMs = (double(flashAt - *it) - offsetNs) / 1e6;
                         haveFlashDelay = true;
                         char buf[64];
                         std::snprintf(buf, sizeof buf, "%.1f ms", flashDelayMs);
@@ -231,13 +265,13 @@ void Correlator::observe(const std::string& source, const Observation& o, double
         }
     }
     if (o.flashStart) {
-        s.flashes.push_back(o.arrivalNs);
+        s.flashes.push_back(flashTime(o));
         while (s.flashes.size() > 16) s.flashes.pop_front();
     }
 
     if (csv_) {
         std::fprintf(csv_, "%s,%s,%" PRId64 ",%" PRId64 ",", source.c_str(), o.flashStart ? "flash" : "frame",
-                     o.arrivalNs, o.frameNumber);
+                     o.flashStart ? flashTime(o) : o.arrivalNs, o.frameNumber);
         if (haveDelay) std::fprintf(csv_, "%.3f", delayMs);
         std::fputc(',', csv_);
         if (haveFlashDelay) std::fprintf(csv_, "%.3f", flashDelayMs);
