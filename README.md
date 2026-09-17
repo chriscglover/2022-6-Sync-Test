@@ -1,13 +1,13 @@
 # 2022-6 Sync Test
 
 Two command-line tools for measuring video delay and lip sync through anything
-that carries SMPTE ST 2022-6/-7 or SDI:
+that carries SMPTE ST 2022-6/-7, SDI or NDI:
 
 - **`sender`** sends a test signal as ST 2022-6, as ST 2022-7 over
-  two paths, or as SDI from a Blackmagic DeckLink.
-- **`probe`** receives it from ST 2022-6/-7 or a Blackmagic DeckLink
-  SDI input. It reports how late each frame arrives compared with a reference
-  point, and how far the audio is from the video.
+  two paths, as SDI from a Blackmagic DeckLink, or as an NDI source.
+- **`probe`** receives it from ST 2022-6/-7, a Blackmagic DeckLink
+  SDI input or an NDI source. It reports how late each frame arrives compared
+  with a reference point, and how far the audio is from the video.
 
 Connect the sender straight to the probe to check the pair: the delay is the
 network path, and lip sync is 0 ms. Then put a system in between and measure
@@ -68,6 +68,7 @@ sudo make install  # optional, to /usr/local/bin
 ```
 
 For DeckLink output and capture, see [Blackmagic DeckLink](#blackmagic-decklink).
+For NDI output and receive, see [NDI](#ndi).
 
 On another machine the binaries need only the GStreamer runtime
 (`libgstreamer1.0-0` and `gstreamer1.0-plugins-base`); the C++ runtime is
@@ -201,7 +202,8 @@ DeckLink reports 2 frames of its own capture delay.
 **Lip sync** is a source's tone mute minus its flash, measured on that one
 source, so it needs no reference. It is reported for every source whose audio
 carries the tone: embedded ST 299/272 on ST 2022-6, the DeckLink's first
-channel on SDI, and the first channel on NDI. Positive means the audio is late. Mutes are timed to the sample.
+channel on SDI, and the first channel on NDI. Positive means the audio is late.
+Mutes are timed to the sample.
 
 **Where the picture is:** a source may show the test picture scaled inside a
 tile. On the first flash the probe takes the rectangle that jumps from dark to
