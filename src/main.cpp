@@ -150,6 +150,12 @@ void usage() {
 "                         Needs Blackmagic Desktop Video and the GStreamer\n"
 "                         decklink plugin (see README); not with --nmos\n"
 "\n"
+"NDI output\n"
+"  --ndi NAME             send as NDI source NAME instead of the network, with\n"
+"                         the same picture, tone and sync pulse. Needs the NDI\n"
+"                         GStreamer plugin and runtime (see README); not with\n"
+"                         --sdi or --nmos\n"
+"\n"
 "NMOS\n"
 "  --nmos                 register as an IS-04 sender and serve IS-05\n"
 "  --nmos-port N          node API port             (default 3210)\n"
@@ -176,6 +182,7 @@ int main(int argc, char** argv) {
     std::string label = "ST 2022 test signal", registry, tcStart;
     double flashEvery = 2.0, reportInterval = 2.0;
     int port = 40000, nmosPort = 3210, sdiDevice = -1;
+    std::string ndiName;
     bool wantNmos = false, peerToPeer = true, idle = false, haveRunTag = false;
 
     for (int i = 1; i < argc; ++i) {
@@ -204,6 +211,7 @@ int main(int argc, char** argv) {
         else if (a == "--no-loopback")  cfg.loopback = false;
         else if (a == "--seconds")      cfg.maxSeconds = std::atof(val().c_str());
         else if (a == "--sdi")          sdiDevice = std::atoi(val().c_str());
+        else if (a == "--ndi")          ndiName = val();
         else if (a == "--nmos")         wantNmos = true;
         else if (a == "--nmos-port")    nmosPort = std::atoi(val().c_str());
         else if (a == "--nmos-iface")   nmosIfaceArg = val();
@@ -267,15 +275,21 @@ int main(int argc, char** argv) {
     }
 
     // ---- DeckLink SDI output ------------------------------------------------
-    if (sdiDevice >= 0) {
+    if (sdiDevice >= 0 || !ndiName.empty()) {
         if (wantNmos) {
-            std::printf("--sdi and --nmos cannot be combined: NMOS describes a network sender\n");
+            std::printf("--%s and --nmos cannot be combined: NMOS describes a network sender\n",
+                        ndiName.empty() ? "sdi" : "ndi");
+            return 2;
+        }
+        if (sdiDevice >= 0 && !ndiName.empty()) {
+            std::printf("--sdi and --ndi cannot be combined: choose one output\n");
             return 2;
         }
         SdiOutputConfig sdi;
         sdi.composer = cfg.composer;
         sdi.timecodeFromTimeOfDay = cfg.timecodeFromTimeOfDay;
         sdi.device = sdiDevice;
+        sdi.ndiName = ndiName;
         sdi.maxSeconds = cfg.maxSeconds;
 
         std::printf("sender %s\n", kVersion);
@@ -294,8 +308,11 @@ int main(int argc, char** argv) {
             return 1;
         }
         const SdiOutputStatus first = output.status();
-        std::printf("output     : DeckLink %d, mode %s, %d audio channels\n\n", sdiDevice, first.mode.c_str(),
-                    first.audioChannels);
+        if (ndiName.empty())
+            std::printf("output     : DeckLink %d, mode %s, %d audio channels\n\n", sdiDevice, first.mode.c_str(),
+                        first.audioChannels);
+        else
+            std::printf("output     : %s, %d audio channels\n\n", first.mode.c_str(), first.audioChannels);
 
         const auto t0 = std::chrono::steady_clock::now();
         double lastReport = -1.0;

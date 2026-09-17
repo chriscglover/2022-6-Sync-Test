@@ -1,4 +1,5 @@
-// Sends the test signal out of a Blackmagic DeckLink as SDI.
+// Sends the test signal out of a Blackmagic DeckLink as SDI, or as an NDI
+// source.
 //
 // The picture and the audio for each frame go into GStreamer's decklink sinks
 // with matching timestamps: frame k's video buffer and the block of samples
@@ -8,6 +9,11 @@
 //
 // No Blackmagic code is linked: GStreamer's decklink plugin loads
 // libDeckLinkAPI.so from Blackmagic Desktop Video at run time.
+//
+// NDI goes through GStreamer's ndisinkcombiner and ndisink (gst-plugins-rs),
+// which load the NDI runtime themselves. There is no card clock there, so the
+// sink paces to the pipeline clock; picture and audio still carry the same
+// timestamps, so NDI's own per-frame timestamps keep them together.
 #pragma once
 
 #include <atomic>
@@ -26,6 +32,7 @@ struct SdiOutputConfig {
     ComposerSettings composer;
     bool   timecodeFromTimeOfDay = true;
     int    device = 0;
+    std::string ndiName;         // non-empty: send as this NDI source instead of SDI
     double maxSeconds = 0.0;     // 0 = until stopped
 };
 

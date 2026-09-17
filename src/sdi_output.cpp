@@ -57,8 +57,10 @@ bool SdiOutput::start(const SdiOutputConfig& cfg, std::string& error) {
     stop();
     const SdiFormatInfo& fi = formatInfo(cfg.composer.format);
     const DeckLinkMode* mode = deckLinkModeFor(cfg.composer.format);
+    const bool ndi = !cfg.ndiName.empty();
     if (!mode) {
-        error = std::string("a DeckLink has no output mode for ") + fi.name;
+        // The mode table also supplies aspect, colorimetry and field order.
+        error = std::string(ndi ? "no raster description for " : "a DeckLink has no output mode for ") + fi.name;
         return false;
     }
     std::call_once(g_gstInit, [] { gst_init(nullptr, nullptr); });
@@ -78,7 +80,19 @@ bool SdiOutput::start(const SdiOutputConfig& cfg, std::string& error) {
         "audio/x-raw,format=S32LE,layout=interleaved,rate=48000,channels=" + std::to_string(channels) +
         ",channel-mask=(bitmask)0x0";
     const std::string device = std::to_string(cfg.device);
-    const std::string description =
+    std::string quotedName = "\"";
+    for (char c : cfg.ndiName) {
+        if (c == '"' || c == '\\') quotedName += '\\';
+        quotedName += c;
+    }
+    quotedName += "\"";
+    const std::string description = ndi ?
+        "appsrc name=vsrc is-live=true format=time block=true max-bytes=" + std::to_string(frameBytes * 3) +
+        " caps=\"" + videoCaps + "\" ! combiner.video"
+        " ndisinkcombiner name=combiner ! ndisink ndi-name=" + quotedName + " sync=true"
+        " appsrc name=asrc is-live=true format=time block=true max-bytes=" + std::to_string(48000 / 5 * 4 * channels) +
+        " caps=\"" + audioCaps + "\" ! audioconvert ! audio/x-raw,format=F32LE,layout=interleaved ! combiner.audio"
+        :
         "appsrc name=vsrc is-live=true format=time block=true max-bytes=" + std::to_string(frameBytes * 3) +
         " caps=\"" + videoCaps + "\" ! videoconvert ! decklinkvideosink device-number=" + device +
         " mode=" + mode->nick +
@@ -94,7 +108,8 @@ bool SdiOutput::start(const SdiOutputConfig& cfg, std::string& error) {
     pipeline_ = gst_parse_launch(description.c_str(), &gerror);
     if (gerror) {
         error = std::string("GStreamer pipeline: ") + gerror->message +
-                " (is the decklink plugin installed? see README)";
+                (ndi ? " (is the NDI plugin on GST_PLUGIN_PATH? see README)"
+                     : " (is the decklink plugin installed? see README)");
         g_error_free(gerror);
         stop();
         return false;
@@ -102,7 +117,7 @@ bool SdiOutput::start(const SdiOutputConfig& cfg, std::string& error) {
     videoSrc_ = gst_bin_get_by_name(GST_BIN(pipeline_), "vsrc");
     audioSrc_ = gst_bin_get_by_name(GST_BIN(pipeline_), "asrc");
     if (gst_element_set_state(pipeline_, GST_STATE_PLAYING) == GST_STATE_CHANGE_FAILURE) {
-        error = "DeckLink output would not start: " + busError(pipeline_);
+        error = std::string(ndi ? "NDI output" : "DeckLink output") + " would not start: " + busError(pipeline_);
         stop();
         return false;
     }
@@ -110,7 +125,7 @@ bool SdiOutput::start(const SdiOutputConfig& cfg, std::string& error) {
         std::lock_guard<std::mutex> lk(mutex_);
         status_ = SdiOutputStatus{};
         status_.running = true;
-        status_.mode = mode->nick;
+        status_.mode = ndi ? std::string("NDI ") + cfg.ndiName : std::string(mode->nick);
         status_.audioChannels = channels;
     }
     stopping_.store(false);
@@ -199,7 +214,8 @@ void SdiOutput::run(SdiOutputConfig cfg) {
 
         if (gst_app_src_push_buffer(GST_APP_SRC(videoSrc_), video) != GST_FLOW_OK ||
             gst_app_src_push_buffer(GST_APP_SRC(audioSrc_), audio) != GST_FLOW_OK) {
-            if (!stopping_.load()) fail("DeckLink output stopped: " + busError(pipeline_));
+            if (!stopping_.load())
+                fail(std::string(cfg.ndiName.empty() ? "DeckLink" : "NDI") + " output stopped: " + busError(pipeline_));
             return;
         }
         const std::string problem = busError(pipeline_);

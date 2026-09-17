@@ -137,6 +137,24 @@ A console line every two seconds reports:
 was sent twice rather than leaving a gap. It should stay at zero. A repeat shifts
 every later frame's marker time by one frame.
 
+### NDI output
+
+```bash
+# the same test signal as an NDI source named "Sync Test"
+sender --format 1080p50 --ndi "Sync Test"
+```
+
+`--ndi NAME` publishes an NDI source instead of sending to the network.
+
+- **Signal:** the picture, tone, flash and mute are the same as on the network,
+  with the tone on 8 channels, or 16 with `--audio-groups` above 2.
+- **A/V timing:** each frame's picture and its audio samples carry matching
+  timestamps, and NDI carries those per frame. The sender straight into the
+  probe reads 0.0 ms at 1080p50 and 1080i50.
+- **Clocking:** there is no card clock, so the pipeline clock paces the output.
+- **Needs:** the NDI GStreamer plugin and runtime; see [NDI](#ndi).
+- **Not with:** `--sdi` or `--nmos`.
+
 **NMOS node IDs** are derived from the machine and the node port. Restart on the
 same `--nmos-port` to keep a controller's existing route. If that port is still
 held, the node moves to the next free one and its sender gets a new ID.
@@ -163,6 +181,12 @@ probe --source in=st2022:239.10.1.1@eth1,239.10.2.1@eth2 \
   ST 2022-7.
 - `sdi:DEVICE[:MODE]` is a DeckLink input, with its mode detected automatically
   by default.
+- `ndi:SOURCE[@MODE]` is an NDI source, named as NDI lists it, for example
+  `ndi:HOST (Sync Test)`. MODE `timestamp` (the default) places picture and
+  audio by the sender's own NDI timestamps, which is what a timestamp-aware
+  receiver plays out. `receive-time` uses when they arrived here instead, which
+  also counts the receiver's own buffering and is the mode to use for delay
+  against another source.
 - The first source is the reference unless `--ref` names another.
 
 **Delay** is a frame's arrival at a source, minus the arrival of the same frame
@@ -176,8 +200,8 @@ DeckLink reports 2 frames of its own capture delay.
 
 **Lip sync** is a source's tone mute minus its flash, measured on that one
 source, so it needs no reference. It is reported for every source whose audio
-carries the tone: embedded ST 299/272 on ST 2022-6, and the DeckLink's first
-channel on SDI. Positive means the audio is late. Mutes are timed to the sample.
+carries the tone: embedded ST 299/272 on ST 2022-6, the DeckLink's first
+channel on SDI, and the first channel on NDI. Positive means the audio is late. Mutes are timed to the sample.
 
 **Where the picture is:** a source may show the test picture scaled inside a
 tile. On the first flash the probe takes the rectangle that jumps from dark to
@@ -231,6 +255,32 @@ and `sdi:` sources fail to start, and they say why.
 A DeckLink can drive an output and capture an input at the same time, so a
 card with both connectors, looped back, lets the sender and the probe check
 each other on one machine.
+
+## NDI
+
+Neither tool contains or links the NDI SDK. NDI output (`sender --ndi`) and
+receive (`probe` `ndi:` sources) go through the NDI GStreamer plugin from
+gst-plugins-rs (`ndisink`, `ndisinkcombiner`, `ndisrc`, `ndisrcdemux`), which
+loads the NDI runtime while it runs.
+
+**What to install:**
+
+1. **The NDI runtime** (`libndi.so.6`), from NDI's own download. Point
+   `NDI_RUNTIME_DIR_V6` at the directory holding it if it is not on the normal
+   library path.
+2. **The NDI GStreamer plugin** (`libgstndi.so`). Few distributions package
+   it; build it from gst-plugins-rs, or copy a build you already have into a
+   directory and point `GST_PLUGIN_PATH` at it.
+
+**Checking the installation:**
+
+```bash
+gst-inspect-1.0 ndisink       # the plugin is present
+gst-inspect-1.0 ndisrc
+```
+
+Without them the network and DeckLink paths still work; only `--ndi` and
+`ndi:` sources fail to start, and they say why.
 
 ## Limits and open points
 
