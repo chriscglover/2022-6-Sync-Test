@@ -59,7 +59,7 @@ TEST_SRC := tests/test_main.cpp
 # The delay probe: receive, locate, decode and correlate (testable) ...
 PROBE_LIB_SRC := src/probe/marker_decode.cpp src/probe/st2022_receiver.cpp src/probe/analyzer.cpp
 # ... and the DeckLink capture and command line.
-PROBE_APP_SRC := src/probe/sdi_capture.cpp src/probe_main.cpp
+PROBE_APP_SRC := src/probe/sdi_capture.cpp src/probe/ndi_capture.cpp src/probe_main.cpp
 PROBE_TEST_SRC := tests/test_probe.cpp
 
 obj = $(patsubst %.cpp,$(BUILD)/obj/%.o,$(1))
@@ -111,6 +111,10 @@ $(BUILD)/obj/src/sdi_output.o: src/sdi_output.cpp
 	$(CXX) $(CXXSTD) $(WARN) $(CXXFLAGS) $(INCLUDES) $(GST_CFLAGS) -MMD -MP -c $< -o $@
 
 $(BUILD)/obj/src/probe/sdi_capture.o: src/probe/sdi_capture.cpp
+	@mkdir -p $(dir $@)
+	$(CXX) $(CXXSTD) $(WARN) $(CXXFLAGS) $(INCLUDES) $(GST_CFLAGS) -MMD -MP -c $< -o $@
+
+$(BUILD)/obj/src/probe/ndi_capture.o: src/probe/ndi_capture.cpp
 	@mkdir -p $(dir $@)
 	$(CXX) $(CXXSTD) $(WARN) $(CXXFLAGS) $(INCLUDES) $(GST_CFLAGS) -MMD -MP -c $< -o $@
 

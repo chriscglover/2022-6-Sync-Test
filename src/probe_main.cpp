@@ -20,6 +20,7 @@
 #include "pcapreplay/net_interfaces.h"
 #include "pcapreplay/net_multicast.h"
 #include "probe/analyzer.h"
+#include "probe/ndi_capture.h"
 #include "probe/sdi_capture.h"
 #include "probe/st2022_receiver.h"
 #include "version.h"
@@ -54,14 +55,15 @@ std::string resolveIface(const std::string& given, std::string& error) {
 
 struct SourceSpec {
     std::string name;
-    enum class Kind { St2022, Sdi } kind = Kind::St2022;
+    enum class Kind { St2022, Sdi, Ndi } kind = Kind::St2022;
     St2022SourceConfig st2022;
     SdiSourceConfig sdi;
+    NdiSourceConfig ndi;
     double offsetFrames = 0.0;
     Region region;
 };
 
-// st2022:GROUP[:PORT][@IFACE][,GROUP[:PORT][@IFACE]]   or   sdi:DEVICE[:MODE]
+// st2022:GROUP[:PORT][@IFACE][,GROUP[:PORT][@IFACE]]   or   sdi:DEVICE[:MODE]   or   ndi:NAME[@MODE]
 bool parseSpec(const std::string& text, int defaultPort, SourceSpec& spec, std::string& error) {
     const std::size_t eq = text.find('=');
     if (eq == std::string::npos) { error = "--source wants NAME=SPEC"; return false; }
@@ -96,7 +98,22 @@ bool parseSpec(const std::string& text, int defaultPort, SourceSpec& spec, std::
         if (parts.size() > 1 && !parts[1].empty()) spec.sdi.mode = parts[1];
         return true;
     }
-    error = "source spec must start st2022: or sdi:";
+    if (body.rfind("ndi:", 0) == 0) {
+        spec.kind = SourceSpec::Kind::Ndi;
+        std::string rest = body.substr(4);
+        const std::size_t at = rest.rfind('@');
+        if (at != std::string::npos) {
+            spec.ndi.timestampMode = rest.substr(at + 1);
+            rest = rest.substr(0, at);
+        }
+        if (rest.empty()) { error = "ndi wants a source name"; return false; }
+        if (spec.ndi.timestampMode != "timestamp" && spec.ndi.timestampMode != "receive-time") {
+            error = "ndi timestamp mode must be timestamp or receive-time"; return false;
+        }
+        spec.ndi.name = rest;
+        return true;
+    }
+    error = "source spec must start st2022:, sdi: or ndi:";
     return false;
 }
 
@@ -114,6 +131,11 @@ void usage() {
 "                         ST 2022-6, or ST 2022-7 with two legs\n"
 "  --source NAME=sdi:DEVICE[:MODE]\n"
 "                         DeckLink SDI input (MODE e.g. 1080p50; default auto)\n"
+"  --source NAME=ndi:SOURCE[@MODE]\n"
+"                         NDI source, e.g. 'HOST (Glovebox Mosaic)'. MODE timestamp\n"
+"                         (default: the sender's timestamps) or receive-time\n"
+"                         (arrival here). Needs the NDI GStreamer plugin on\n"
+"                         GST_PLUGIN_PATH and NDI_RUNTIME_DIR_V6\n"
 "  --ref NAME             the reference source (default: the first given)\n"
 "  --offset NAME=FRAMES   subtract a device's own delay, in that source's frames\n"
 "                         (a DeckLink reports 2)\n"
@@ -203,6 +225,7 @@ int main(int argc, char** argv) {
         MuteDetector mute;
         std::unique_ptr<St2022Receiver> st2022;
         std::unique_ptr<SdiCapture> sdi;
+        std::unique_ptr<NdiCapture> ndi;
         std::mutex mutex, audioMutex;
         std::string format;
         std::uint64_t frames = 0, markers = 0, flashes = 0, mutes = 0;
@@ -244,6 +267,10 @@ int main(int argc, char** argv) {
             std::printf("%-8s ST 2022-%s %s:%u%s%s\n", spec.name.c_str(), spec.st2022.haveB ? "7" : "6",
                         spec.st2022.a.group.c_str(), spec.st2022.a.port,
                         spec.st2022.haveB ? " + " : "", spec.st2022.haveB ? spec.st2022.b.group.c_str() : "");
+        } else if (spec.kind == SourceSpec::Kind::Ndi) {
+            r->ndi = std::make_unique<NdiCapture>();
+            if (!r->ndi->start(spec.ndi, frames, audio, error)) { std::printf("%s: %s\n", spec.name.c_str(), error.c_str()); return 1; }
+            std::printf("%-8s NDI %s, %s timestamps\n", spec.name.c_str(), spec.ndi.name.c_str(), spec.ndi.timestampMode.c_str());
         } else {
             r->sdi = std::make_unique<SdiCapture>();
             if (!r->sdi->start(spec.sdi, frames, audio, error)) { std::printf("%s: %s\n", spec.name.c_str(), error.c_str()); return 1; }
@@ -280,6 +307,10 @@ int main(int argc, char** argv) {
             } else if (r->sdi) {
                 const SdiStats s = r->sdi->stats();
                 if (!s.lastProblem.empty()) extra = "  (" + s.lastProblem + ")";
+            } else if (r->ndi) {
+                const NdiStats s = r->ndi->stats();
+                extra = "  audio blocks " + std::to_string(s.audioBlocks);
+                if (!s.lastProblem.empty()) extra += "  (" + s.lastProblem + ")";
             }
             const Region reg = r->analyzer->region();
             char regionText[64] = "";
@@ -299,6 +330,7 @@ int main(int argc, char** argv) {
     for (auto& r : running) {
         if (r->st2022) r->st2022->stop();
         if (r->sdi) r->sdi->stop();
+        if (r->ndi) r->ndi->stop();
     }
     for (const auto& line : correlator.report()) std::printf("%s\n", line.c_str());
     if (csv) std::fclose(csv);
