@@ -267,6 +267,18 @@ void testChannelStatus() {
     CHECK(channelStatusCrc(cs.data()) == cs[23]);
 }
 
+void testSt299Ecc() {
+    std::printf("ST 299-1 ECC\n");
+    // Group 1, DBN 157, from a third-party embedder's capture (1080p.pcap):
+    // ADF, DID, DBN, DC, then UDW0..17, and the ECC it sent.
+    const std::uint8_t first24[24] = {
+        0x00, 0xFF, 0xFF, 0xE7, 157, 24,
+        0x00, 0x00, 0x00, 0x30, 0x09, 0x00, 0x00, 0xF0, 0x09, 0x00, 0xE0, 0x1F,
+        0x00, 0x00, 0xF0, 0xFC, 0xFF, 0x0F};
+    const std::array<std::uint8_t, 6> sent = {0xC6, 0x8B, 0x4F, 0x0A, 0xEF, 0x46};
+    CHECK(st299Ecc(first24) == sent);
+}
+
 void testFormat(SdiFormat format, int flashPeriod, int groups) {
     const SdiFormatInfo& fi = formatInfo(format);
     std::printf("%s, %d group(s)\n", fi.name, groups);
@@ -361,6 +373,7 @@ int main() {
     testTimecode();
     testMarkerPayload();
     testChannelStatus();
+    testSt299Ecc();
     testDeckLinkModes();
     // Four groups (the default, 16 channels) must fit every raster's HANC.
     testFormat(SdiFormat::HD1080i25, 3, 1);

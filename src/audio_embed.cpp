@@ -55,6 +55,9 @@ std::array<std::uint8_t, 24> professionalChannelStatus(int wordLengthBits) {
 
 std::array<std::uint8_t, 6> st299Ecc(const std::uint8_t* first24) {
     // g(x) = (x + 1)(x^5 + x^2 + 1) = x^6 + x^5 + x^3 + x^2 + x + 1.
+    // ECC0 is the register's highest stage: two independent third-party
+    // embedders agree on every packet. The words were reversed until
+    // 2026-10-13, so every audio packet failed its ECC.
     constexpr std::uint8_t kFeedback = 0x2F;   // g(x) without x^6
     std::array<std::uint8_t, 6> ecc{};
     for (int plane = 0; plane < 8; ++plane) {
@@ -66,7 +69,7 @@ std::array<std::uint8_t, 6> st299Ecc(const std::uint8_t* first24) {
             if (feedback) reg ^= kFeedback;
         }
         for (int k = 0; k < 6; ++k)
-            if (reg & (1 << k)) ecc[std::size_t(k)] |= std::uint8_t(1 << plane);
+            if (reg & (1 << (5 - k))) ecc[std::size_t(k)] |= std::uint8_t(1 << plane);
     }
     return ecc;
 }
