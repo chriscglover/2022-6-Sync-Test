@@ -85,7 +85,7 @@ std::array<std::uint8_t, 24> professionalChannelStatus(int wordLengthBits);
 std::uint8_t channelStatusCrc(const std::uint8_t* first23);
 
 // ST 299-1 ECC over the 24 words ADF..UDW17 (low eight bits), BCH(31,25) per
-// bit plane. See the README: not yet confirmed against third-party kit.
+// bit plane, ECC0 first. Matches two third-party embedders on every packet.
 std::array<std::uint8_t, 6> st299Ecc(const std::uint8_t* first24);
 
 // 8-bit data word with even parity in b8 and b9 = !b8, as ST 291 requires.

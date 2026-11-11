@@ -354,9 +354,6 @@ Without them the network and DeckLink paths still work; only `--ndi` and
 
 ## Limits and open points
 
-- **ST 299-1 ECC** is BCH(31,25) per bit plane, with generator
-  x^6+x^5+x^3+x^2+x+1. It has not yet been confirmed against third-party kit. A
-  receiver that enforces ECC and rejects the audio points here first.
 - **No audio control packets** are sent (ST 299-1 DID E3..E0 / ST 272 extended
   packets). Receivers assume 48 kHz synchronous audio without them.
 - **Timing is internal:** the sender is not PTP-locked. The HBRMT R field is 3.
