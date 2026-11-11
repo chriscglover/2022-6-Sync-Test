@@ -125,6 +125,8 @@ void usage() {
 "Signal\n"
 "  --format F             raster (default 1080i50); --formats lists them\n"
 "  --title TEXT           top line of the picture (default \"VIDEO TEST SIGNAL\")\n"
+"  --background RRGGBB    colour behind the ball (default 000000; 808080 is\n"
+"                         50%% grey). At most 60%% luma, so the flash still shows\n"
 "  --flash-every S        seconds between flashes, whole frames (default 2; 0 = none)\n"
 "  --flash-frames N       frames each flash and mute lasts (default 1)\n"
 "  --tone HZ              tone frequency (default 1000)\n"
@@ -195,7 +197,7 @@ int main(int argc, char** argv) {
     std::string label = "ST 2022 test signal", registry, tcStart;
     double flashEvery = 2.0, reportInterval = 2.0;
     int port = 40000, nmosPort = 3210, sdiDevice = -1;
-    std::string ndiName;
+    std::string ndiName, backgroundArg;
     int newforPort = 0, ttxPackets = 1;
     std::string newforBind, newforPage = "888";
     double ttxRepeat = 2.0;
@@ -210,6 +212,7 @@ int main(int argc, char** argv) {
         else if (a == "--interfaces")   return listInterfaces();
         else if (a == "--format")       formatArg = val();
         else if (a == "--title")        cfg.composer.title = val();
+        else if (a == "--background")   backgroundArg = val();
         else if (a == "--flash-every")  flashEvery = std::atof(val().c_str());
         else if (a == "--flash-frames") cfg.composer.flashFrames = std::atoi(val().c_str());
         else if (a == "--tone")         cfg.composer.audio.toneHz = std::atof(val().c_str());
@@ -279,6 +282,19 @@ int main(int argc, char** argv) {
     if (cfg.composer.audio.stepDb < 0.0 || cfg.composer.audio.stepDb > 6.0) {
         std::printf("--tone-step must be between 0 and 6 dB\n");
         return 2;
+    }
+    if (!backgroundArg.empty()) {
+        if (!parseRgb(backgroundArg, cfg.composer.backgroundRgb)) {
+            std::printf("--background wants a colour as RRGGBB, e.g. 808080\n");
+            return 2;
+        }
+        const int y = videoLuma(cfg.composer.backgroundRgb);
+        if (y > kMaxBackgroundY) {
+            std::printf("--background %s is too bright (luma %d of 235, at most %d): the probe "
+                        "could not see the white flash against it\n",
+                        backgroundArg.c_str(), y, kMaxBackgroundY);
+            return 2;
+        }
     }
     if (!tcStart.empty()) {
         Timecode tc;
@@ -360,6 +376,9 @@ int main(int argc, char** argv) {
 
         std::printf("sender %s\n", kVersion);
         std::printf("format     : %s\n", formatDescription(fi.id).c_str());
+        if (cfg.composer.backgroundRgb)
+            std::printf("background : %06X (luma %d)\n", unsigned(cfg.composer.backgroundRgb),
+                        videoLuma(cfg.composer.backgroundRgb));
         std::printf("audio      : %d group(s) of tone, %.0f Hz, channel 1 at %.1f dBFS, %g dB lower per channel\n",
                     cfg.composer.audio.groups, cfg.composer.audio.toneHz, cfg.composer.audio.levelDbfs,
                     cfg.composer.audio.stepDb);
@@ -431,6 +450,9 @@ int main(int argc, char** argv) {
     WinsockScope sockets;
     std::printf("sender %s\n", kVersion);
     std::printf("format     : %s\n", formatDescription(fi.id).c_str());
+    if (cfg.composer.backgroundRgb)
+        std::printf("background : %06X (luma %d)\n", unsigned(cfg.composer.backgroundRgb),
+                    videoLuma(cfg.composer.backgroundRgb));
     std::printf("audio      : %d group(s), %.0f Hz, channel 1 at %.1f dBFS, %g dB lower per channel\n",
                 cfg.composer.audio.groups, cfg.composer.audio.toneHz, cfg.composer.audio.levelDbfs,
                 cfg.composer.audio.stepDb);

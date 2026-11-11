@@ -263,6 +263,20 @@ void testDeckLinkModes() {
     CHECK(deckLinkAudioChannels(1) == 8 && deckLinkAudioChannels(3) == 16);
 }
 
+void testBackgroundColour() {
+    std::printf("background colour\n");
+    std::uint32_t rgb = 1;
+    CHECK(parseRgb("808080", rgb) && rgb == 0x808080);
+    CHECK(parseRgb("#00a0FF", rgb) && rgb == 0x00A0FF);
+    for (const char* bad : {"", "80808", "8080800", "grey", "#12345g", "0x8080"})
+        CHECK(!parseRgb(bad, rgb));
+    CHECK(videoLuma(0x000000) == 16 && videoLuma(0xFFFFFF) == 235);
+    // 50% grey is accepted; the white flash stays more than 80 above it.
+    CHECK(videoLuma(0x808080) == 126 && videoLuma(0x808080) <= kMaxBackgroundY);
+    CHECK(kWhiteY - kMaxBackgroundY > 80);
+    CHECK(videoLuma(0xC0C0C0) > kMaxBackgroundY);
+}
+
 void testChannelStatus() {
     std::printf("channel status\n");
     const auto cs = professionalChannelStatus(24);
@@ -701,6 +715,7 @@ int main() {
     testTimecode();
     testMarkerPayload();
     testChannelStatus();
+    testBackgroundColour();
     testSt299Ecc();
     testDeckLinkModes();
     // Four groups (the default, 16 channels) must fit every raster's HANC.

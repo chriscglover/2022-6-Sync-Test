@@ -20,7 +20,10 @@ it.
 **Picture:** every raster the format table supports (1080i/p, 720p, 625i and
 525i):
 
-- GStreamer's moving ball as the background, one step per frame.
+- GStreamer's moving ball as the background, one step per frame, on black.
+  `--background RRGGBB` sets another colour, for example `808080` for 50% grey.
+  Its luma is limited to 150 (about 60%), so that the white flash still lifts
+  every picture sample by more than the probe needs to find the picture.
 - The title, the burnt-in timecode (`HH:MM:SS:FF`, or `;FF` for drop-frame),
   the frame number, and a line describing the signal.
 - A machine-readable frame marker in the bottom-left corner. It carries a run

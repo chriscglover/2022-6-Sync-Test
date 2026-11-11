@@ -18,12 +18,13 @@ std::once_flag g_gstInit;
 PictureSource::~PictureSource() { close(); }
 
 bool PictureSource::open(int width, int height, int frameRateNum, int frameRateDen,
-                         std::string& error) {
+                         std::uint32_t backgroundRgb, std::string& error) {
     std::call_once(g_gstInit, [] { gst_init(nullptr, nullptr); });
     close();
 
     const std::string description =
-        "videotestsrc is-live=false pattern=ball animation-mode=frames"
+        "videotestsrc is-live=false pattern=ball animation-mode=frames background-color=" +
+        std::to_string(0xFF000000u | (backgroundRgb & 0xFFFFFFu)) +   // ARGB, opaque
         " ! video/x-raw,format=UYVY,width=" + std::to_string(width) +
         ",height=" + std::to_string(height) +
         ",framerate=" + std::to_string(frameRateNum) + "/" + std::to_string(frameRateDen) +
