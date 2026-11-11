@@ -3,6 +3,6 @@
 
 namespace testsignal {
 
-inline constexpr const char* kVersion = "1.1.0";
+inline constexpr const char* kVersion = "1.2.0";
 
 }  // namespace testsignal

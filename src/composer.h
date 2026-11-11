@@ -18,6 +18,7 @@
 #pragma once
 
 #include <cstdint>
+#include <memory>
 #include <span>
 #include <string>
 #include <vector>
@@ -26,6 +27,7 @@
 #include "overlay.h"
 #include "pcapreplay/sdi_format.h"
 #include "pcapreplay/sdi_raster.h"
+#include "teletext.h"
 #include "timecode.h"
 
 namespace testsignal {
@@ -38,7 +40,18 @@ struct ComposerSettings {
     std::int64_t  timecodeStartFrames = 0;  // timecode shown on frame 0
     std::string   title = "VIDEO TEST SIGNAL";
     std::uint64_t runTag = 0;
+    // Teletext subtitles to insert, or null for none: OP-47 in luma VANC on HD,
+    // the WST waveform on the blanking lines of 625-line SD.
+    std::shared_ptr<TeletextPager> teletext;
+    int           teletextPacketsPerFrame = 1;   // HD 1..5, SD 1..16
 };
+
+// Where teletext goes on a raster. HD: the single wire line carrying the OP-47
+// packet (575 on interlaced rasters, as broadcast inserters use; 12 on
+// progressive). 625-line SD: the first of `packets` consecutive lines ending on
+// line 335. 0 on a raster that cannot carry it (525-line SD).
+int teletextLine(const pcapreplay::SdiFormatInfo& fi, int packets);
+int maxTeletextPacketsPerFrame(const pcapreplay::SdiFormatInfo& fi);
 
 // Timing state of one raster line as it goes on the wire.
 struct WireLine {
@@ -74,7 +87,8 @@ public:
                                           std::uint64_t captureUtcMs);
 
 private:
-    void serialise(UyvyImage picture);
+    void serialise(UyvyImage picture, const std::vector<TeletextPacket>& teletext);
+    void insertTeletext(const std::vector<TeletextPacket>& packets);
 
     ComposerSettings            settings_;
     pcapreplay::SdiFormatInfo   fi_;
@@ -88,6 +102,7 @@ private:
     std::vector<int>            lineIndex_;  // 0..totalLines-1, for parallel passes
     std::vector<std::uint16_t>  wire_;       // words in wire order
     std::vector<std::uint8_t>   packed_;
+    std::uint16_t               sdpSequence_ = 0;
 };
 
 }  // namespace testsignal

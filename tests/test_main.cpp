@@ -7,6 +7,8 @@
 // The checks deliberately restate those rules rather than reuse the composer's
 // own tables: a decoder checked only against its own writer agrees with itself
 // by construction.
+#include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -16,6 +18,8 @@
 
 #include "audio_embed.h"
 #include "composer.h"
+#include "newfor.h"
+#include "teletext.h"
 #include "decklink_modes.h"
 #include "overlay.h"
 #include "pcapreplay/bitpack.h"
@@ -367,6 +371,330 @@ void testFormat(SdiFormat format, int flashPeriod, int groups) {
     CHECK(totalSamples == AudioEmbedder::firstSampleOfFrame(fi, nFrames));
 }
 
+// ---- teletext ----------------------------------------------------------------
+//
+// The rules restated from the receiving side, as real broadcast captures carry
+// them: Hamming data bits ride b1, b3, b5 and b7; magazine 8 is sent as 0; the
+// OP-47 data blocks start at byte 9.
+
+int hamData(std::uint8_t b) {
+    return ((b >> 1) & 1) | (((b >> 3) & 1) << 1) | (((b >> 5) & 1) << 2) | (((b >> 7) & 1) << 3);
+}
+
+struct Ttx {
+    int magazine = 0, packet = 0, page = -1;
+    bool erase = false, subtitle = false;
+    std::string text;
+    std::vector<std::uint8_t> raw;   // the 42 packet bytes
+};
+
+Ttx parseTtx(const std::uint8_t* p) {
+    Ttx t;
+    const int h0 = hamData(p[0]), h1 = hamData(p[1]);
+    t.magazine = (h0 & 7) ? (h0 & 7) : 8;
+    t.packet = ((h1 << 1) | (h0 >> 3)) & 0x1F;
+    if (t.packet == 0) {
+        t.page = (t.magazine << 8) | (hamData(p[3]) << 4) | hamData(p[2]);
+        t.erase = hamData(p[5]) & 0x8;
+        t.subtitle = hamData(p[7]) & 0x8;
+    } else {
+        for (int i = 2; i < 42; ++i) {
+            const int c = p[i] & 0x7F;
+            t.text.push_back(c >= 0x20 && c < 0x7F ? char(c) : ' ');
+        }
+    }
+    t.raw.assign(p, p + 42);
+    return t;
+}
+
+std::array<std::uint8_t, 40> cellsOf(const std::string& text, std::uint8_t colour = 0x07) {
+    // NewforTest's layout: double height, two start-box, colour, then text.
+    std::array<std::uint8_t, 40> c;
+    c.fill(' ');
+    std::size_t i = 0;
+    c[i++] = 0x0D; c[i++] = 0x0B; c[i++] = 0x0B; c[i++] = colour;
+    for (char ch : text) if (i < 38) c[i++] = std::uint8_t(ch);
+    c[i++] = 0x0A; c[i++] = 0x0A;
+    return c;
+}
+
+void testHamming() {
+    std::printf("teletext: Hamming 8/4 and parity\n");
+    int wrong = 0, uncorrected = 0;
+    for (int n = 0; n < 16; ++n) {
+        const std::uint8_t b = hamming84(n);
+        if (hamData(b) != n || hamming84Decode(b) != n) ++wrong;
+        for (int bit = 0; bit < 8; ++bit)
+            if (hamming84Decode(std::uint8_t(b ^ (1 << bit))) != n) ++uncorrected;
+    }
+    CHECK(wrong == 0);
+    CHECK(uncorrected == 0);
+    CHECK(oddParity('A') == 0xC1 && oddParity(' ') == 0x20 && oddParity(0x0D) == 0x0D);
+}
+
+void testTeletextAgainstCapture() {
+    std::printf("teletext: packets and OP-47 match a broadcast capture\n");
+    // Headers as broadcast kit sent them for page 888 (erase) and 887 (repeat).
+    const std::uint8_t h888[10] = {0x15, 0x15, 0xD0, 0xD0, 0x15, 0xD0, 0x15, 0xD0, 0x73, 0x15};
+    const std::uint8_t h887[10] = {0x15, 0x15, 0x2F, 0xD0, 0x15, 0x15, 0x15, 0xD0, 0x73, 0x15};
+    PageControl erase;
+    erase.erase = true;
+    CHECK(std::memcmp(headerPacket(0x888, erase).data(), h888, 10) == 0);
+    CHECK(std::memcmp(headerPacket(0x887, PageControl{}).data(), h887, 10) == 0);
+
+    // A complete OP-47 user data payload from the same capture: one row-22
+    // packet, footer sequence 0x9A01.
+    const std::vector<std::uint8_t> real = {
+        0x51, 0x15, 0x3A, 0x02, 0x16, 0x00, 0x00, 0x00, 0x00, 0x55, 0x55, 0x27, 0x15, 0x9B,
+        0x20, 0x0D, 0x0B, 0x0B, 0xCB, 0x61, 0xF4, 0xE5, 0x2C, 0x20, 0xE3, 0x61, 0x6E, 0x20,
+        0x49, 0x20, 0x68, 0x61, 0x76, 0xE5, 0x20, 0x61, 0x20, 0xF7, 0xEF, 0xF2, 0x64, 0x20,
+        0xF7, 0xE9, 0xF4, 0x68, 0x20, 0x79, 0xEF, 0x75, 0xBF, 0x8A, 0x8A, 0x20, 0x74, 0x9A,
+        0x01, 0x9C};
+    std::array<std::uint8_t, 40> cells{};
+    for (int i = 0; i < 40; ++i) cells[std::size_t(i)] = real[std::size_t(14 + i)] & 0x7F;
+    const TeletextPacket row = rowPacket(8, 22, cells);
+    CHECK(row[0] == 0x15 && row[1] == 0x9B);
+    CHECK(op47Sdp(std::span<const TeletextPacket>(&row, 1), 0x9A01) == real);
+
+    // Five packets: the length counts every byte and the bytes sum to zero.
+    std::vector<TeletextPacket> five(5, row);
+    const auto sdp = op47Sdp(five, 0xFFFF);
+    unsigned sum = 0;
+    for (auto b : sdp) sum += b;
+    CHECK(sdp.size() == 9 + 5 * 45 + 4 && sdp[2] == sdp.size());
+    CHECK((sum & 0xFF) == 0);
+    CHECK(sdp[4] == 18 && sdp[8] == 22);
+}
+
+std::vector<Ttx> drain(TeletextPager& pager, int frames, int perFrame = 1) {
+    std::vector<Ttx> out;
+    for (int f = 0; f < frames; ++f)
+        for (const auto& p : pager.takeFrame(perFrame)) out.push_back(parseTtx(p.data()));
+    return out;
+}
+
+void testPager() {
+    std::printf("teletext: page cycles, repeats and erases\n");
+    TeletextPager pager(50, 0x888);
+    CHECK(drain(pager, 100).empty());   // nothing on air: nothing to send
+
+    // NewforTest's order: CLEAR, BUILD (first row clears), REVEAL. The CLEAR
+    // has not gone out before the caption arrives, so the two merge.
+    pager.clear();
+    const auto r20 = cellsOf("TWO LINE"), r22 = cellsOf("SUBTITLE");
+    pager.build(true, 20, r20);
+    pager.build(false, 22, r22);
+    pager.reveal();
+    auto out = drain(pager, 10);
+    CHECK(out.size() == 4);
+    if (out.size() == 4) {
+        CHECK(out[0].packet == 0 && out[0].page == 0x888 && out[0].erase && out[0].subtitle);
+        CHECK(out[1].packet == 20 && out[1].text.find("TWO LINE") != std::string::npos);
+        CHECK(out[2].packet == 22 && out[2].text.find("SUBTITLE") != std::string::npos);
+        CHECK(out[3].packet == 0 && out[3].page == 0x8FF && !out[3].erase);
+        // Rows go out with odd parity on every byte.
+        int even = 0;
+        for (int i = 2; i < 42; ++i) if (__builtin_popcount(out[1].raw[std::size_t(i)]) % 2 == 0) ++even;
+        CHECK(even == 0);
+    }
+    CHECK(pager.stats().coalesced == 1);
+
+    // Repeats: the same rows, C4 clear, 50 frames after the last packet went
+    // out (frame 4 of the 10 just drained).
+    out = drain(pager, 43);
+    CHECK(out.empty());
+    out = drain(pager, 4);
+    CHECK(out.size() == 4 && !out.empty() && out[0].page == 0x888 && !out[0].erase);
+
+    // An add-on row with no clear bit: C4 clear, only the new row.
+    pager.build(false, 18, cellsOf("ADDED"));
+    pager.reveal();
+    out = drain(pager, 10);
+    CHECK(out.size() == 5);   // header, rows 18/20/22, filler: the whole page
+
+    // CLEAR: an erase (C4, no rows), and the erase repeats.
+    pager.clear();
+    out = drain(pager, 10);
+    CHECK(out.size() == 2 && out[0].page == 0x888 && out[0].erase && out[1].page == 0x8FF);
+    out = drain(pager, 50);
+    CHECK(out.size() == 2 && !out.empty() && out[0].erase);
+
+    // Changing page takes the old page's caption off air first.
+    pager.build(true, 22, cellsOf("OLD PAGE"));
+    pager.reveal();
+    drain(pager, 10);
+    pager.connect(0x801);
+    out = drain(pager, 10);
+    CHECK(out.size() == 2 && !out.empty() && out[0].page == 0x888 && out[0].erase);
+    CHECK(pager.page() == 0x801);
+
+    // More packets per frame: a whole cycle in one frame.
+    TeletextPager fast(0, 0x888);
+    fast.build(true, 22, cellsOf("FAST"));
+    fast.reveal();
+    CHECK(fast.takeFrame(5).size() == 3);
+    CHECK(drain(fast, 200).empty());   // repeat off
+}
+
+std::vector<std::uint8_t> newforConnect(int mag, int tens, int units) {
+    return {0x0E, 0x00, hamming84(mag), hamming84(tens), hamming84(units)};
+}
+
+std::vector<std::uint8_t> newforBuild(bool clear, const std::vector<std::pair<int, std::array<std::uint8_t, 40>>>& rows) {
+    std::vector<std::uint8_t> b = {0x8F, hamming84((clear ? 8 : 0) | int(rows.size()))};
+    for (const auto& [row, cells] : rows) {
+        b.push_back(hamming84(row >> 4));
+        b.push_back(hamming84(row & 0x0F));
+        for (auto c : cells) b.push_back(oddParity(c));
+    }
+    return b;
+}
+
+void testNewforParser() {
+    std::printf("NEWFOR: commands to the pager\n");
+    TeletextPager pager(0, 0x100);
+    std::vector<std::string> log;
+    NewforParser parser(pager, [&](const std::string& s) { log.push_back(s); });
+
+    std::vector<std::uint8_t> stream;
+    auto add = [&](const std::vector<std::uint8_t>& b) { stream.insert(stream.end(), b.begin(), b.end()); };
+    add(newforConnect(8, 8, 8));
+    add({0x98});                                                     // CLEAR
+    add(newforBuild(true, {{20, cellsOf("BUT WHAT IF")}}));          // FAB: one row per BUILD
+    add(newforBuild(false, {{22, cellsOf("YOU COULD")}}));
+    add({0x10});                                                     // REVEAL
+    // A byte at a time, as a slow link might deliver it.
+    for (auto b : stream) parser.feed({&b, 1});
+    CHECK(pager.page() == 0x888);
+    CHECK(parser.commands() == 5);
+    auto out = drain(pager, 10);
+    CHECK(out.size() == 4 && !out.empty() && out[0].erase);
+    CHECK(out.size() == 4 && out[1].packet == 20 && out[2].packet == 22 &&
+          out[2].text.find("YOU COULD") != std::string::npos);
+
+    // Several rows in one BUILD, then DISCONNECT (page 999) erases it.
+    stream.clear();
+    add(newforBuild(true, {{18, cellsOf("ONE")}, {20, cellsOf("TWO")}, {22, cellsOf("THREE")}}));
+    add({0x10});
+    add(newforConnect(9, 9, 9));
+    parser.feed(stream);
+    CHECK(parser.disconnected());
+    out = drain(pager, 10);
+    CHECK(out.size() == 2 && !out.empty() && out[0].erase);   // merged: the caption never went out
+    CHECK(parser.unknownBytes() == 0);
+}
+
+// The SD slicer, restated: 1.945945 samples a bit, linear interpolation, a
+// phase search locking the run-in and framing code.
+bool sliceWst(const std::uint16_t* luma, int n, TeletextPacket& out) {
+    const double spb = 13.5e6 / 6.9375e6;
+    std::uint16_t mn = 1023, mx = 0;
+    for (int i = 0; i < n; ++i) { mn = std::min(mn, luma[i]); mx = std::max(mx, luma[i]); }
+    if (mx - mn < 200) return false;
+    const double mid = (mn + mx) / 2.0;
+    auto at = [&](double pos) {
+        const int i = int(pos);
+        if (i + 1 >= n) return double(luma[n - 1]);
+        const double f = pos - i;
+        return luma[i] * (1 - f) + luma[i + 1] * f;
+    };
+    auto bit = [&](int i, double s) { return at(s + i * spb) > mid ? 1 : 0; };
+    auto byte = [&](int i, double s) { int v = 0; for (int b = 0; b < 8; ++b) v |= bit(i + b, s) << b; return v; };
+    int best = -1;
+    double bestStart = 0;
+    for (double s = 2.0; s < 14.0; s += 0.02) {
+        int score = 0;
+        for (int b = 0; b < 15; ++b) score += bit(b, s) != bit(b + 1, s);
+        if (byte(16, s) == 0x27) score += 20;
+        if (score > best) { best = score; bestStart = s; }
+    }
+    if (byte(16, bestStart) != 0x27) return false;
+    for (int i = 0; i < 42; ++i) out[std::size_t(i)] = std::uint8_t(byte(24 + 8 * i, bestStart));
+    return true;
+}
+
+void testTeletextInFrame(SdiFormat format, int perFrame) {
+    const SdiFormatInfo& fi = formatInfo(format);
+    std::printf("teletext in %s, %d packet(s)/frame\n", fi.name, perFrame);
+    ComposerSettings s;
+    s.format = format;
+    s.flashPeriodFrames = 0;
+    s.audio.groups = 4;
+    s.teletext = std::make_shared<TeletextPager>(0, 0x888);
+    s.teletextPacketsPerFrame = perFrame;
+    s.teletext->build(true, 20, cellsOf("SUBTITLE ROW 20"));
+    s.teletext->build(false, 22, cellsOf("SUBTITLE ROW 22"));
+    s.teletext->reveal();
+    FrameComposer composer(s);
+
+    const int line = teletextLine(fi, perFrame);
+    CHECK(line > 0);
+    std::vector<Ttx> got;
+    int sequence = -1, sdps = 0, badAnc = 0;
+    const int lw = fi.totalSamples * 2, aw = fi.activeWidth * 2;
+    for (int k = 0; k < 6; ++k) {
+        auto pic = rampPicture(fi);
+        UyvyImage img{pic.data(), fi.activeWidth, fi.activeHeight, fi.activeWidth * 2};
+        const auto packed = composer.compose(img, std::uint64_t(k), 1000);
+        std::vector<std::uint16_t> w(std::size_t(lw) * fi.totalLines);
+        unpack10(packed.data(), w.size(), w.data());
+        // Timing references, line numbers and CRCs still check out, the CRC
+        // now covering the inserted data.
+        const WireCheck wc = checkWire(fi, w, pic);
+        CHECK(wc.badEav == 0 && wc.badSav == 0 && wc.badLn == 0 && wc.badCrc == 0);
+        CHECK(receiverRules(fi, line).v && receiverRules(fi, line).row < 0);
+        CHECK(decodeAudio(fi, w).badChecksums == 0);
+
+        const std::uint16_t* active = w.data() + std::size_t(line - 1) * lw + (lw - aw);
+        if (fi.isHd) {
+            // ANC in the luma stream: ADF, DID 0x43, SDID 0x02, DC, UDW, checksum.
+            const std::uint16_t* y = active + 1;
+            if (!(y[0] == 0 && y[2] == 0x3FF && y[4] == 0x3FF)) continue;
+            ++sdps;
+            const int dc = y[10] & 0xFF;
+            std::vector<std::uint16_t> words;
+            for (int q = 0; q < 3 + dc; ++q) words.push_back(y[2 * (3 + q)]);
+            if ((words[0] & 0xFF) != 0x43 || (words[1] & 0xFF) != 0x02) ++badAnc;
+            if (ancChecksum(words.data(), words.size()) != y[2 * (6 + dc)]) ++badAnc;
+            for (auto x : words) if (!nineBitParityOk(x)) ++badAnc;
+            std::vector<std::uint8_t> udw;
+            for (int q = 0; q < dc; ++q) udw.push_back(std::uint8_t(words[std::size_t(3 + q)]));
+            unsigned sum = 0;
+            for (auto b : udw) sum += b;
+            if (udw[0] != 0x51 || udw[1] != 0x15 || udw[2] != dc || udw[3] != 0x02 || (sum & 0xFF)) ++badAnc;
+            const int seq = (udw[std::size_t(dc - 3)] << 8) | udw[std::size_t(dc - 2)];
+            if (sequence >= 0 && seq != sequence + 1) ++badAnc;
+            sequence = seq;
+            int blocks = 0;
+            for (int d = 0; d < 5; ++d) blocks += udw[std::size_t(4 + d)] != 0;
+            for (int b = 0; b < blocks; ++b) {
+                const std::uint8_t* blk = udw.data() + 9 + 45 * b;
+                if (blk[0] != 0x55 || blk[1] != 0x55 || blk[2] != 0x27) { ++badAnc; continue; }
+                got.push_back(parseTtx(blk + 3));
+            }
+        } else {
+            for (int l = line; l < line + perFrame; ++l) {
+                const std::uint16_t* a = w.data() + std::size_t(l - 1) * lw + (lw - aw);
+                std::uint16_t luma[720];
+                for (int q = 0; q < 720; ++q) luma[q] = a[1 + 2 * q];
+                TeletextPacket p;
+                if (sliceWst(luma, 720, p)) got.push_back(parseTtx(p.data()));
+                // Never outside the legal range, never on the chroma words.
+                for (int q = 0; q < 720; ++q) if (luma[q] < 64 || luma[q] > 940 || a[2 * q] != kBlankChroma) { ++badAnc; break; }
+            }
+        }
+    }
+    CHECK(badAnc == 0);
+    if (fi.isHd) CHECK(sdps == (4 + perFrame - 1) / perFrame);
+    CHECK(got.size() == 4);
+    if (got.size() == 4) {
+        CHECK(got[0].page == 0x888 && got[0].erase && got[0].subtitle);
+        CHECK(got[1].packet == 20 && got[1].text.find("SUBTITLE ROW 20") != std::string::npos);
+        CHECK(got[2].packet == 22 && got[2].text.find("SUBTITLE ROW 22") != std::string::npos);
+        CHECK(got[3].page == 0x8FF);
+    }
+}
+
 }  // namespace
 
 int main() {
@@ -384,6 +712,18 @@ int main() {
     testFormat(SdiFormat::HD720p5994, 3, 4);
     testFormat(SdiFormat::SD625i25, 3, 4);
     testFormat(SdiFormat::SD525i2997, 3, 4);
+    testHamming();
+    testTeletextAgainstCapture();
+    testPager();
+    testNewforParser();
+    testTeletextInFrame(SdiFormat::HD1080i25, 1);
+    testTeletextInFrame(SdiFormat::HD1080i25, 5);
+    testTeletextInFrame(SdiFormat::HD1080p50, 2);
+    testTeletextInFrame(SdiFormat::HD720p50, 1);
+    testTeletextInFrame(SdiFormat::HD1080i2997, 1);
+    testTeletextInFrame(SdiFormat::SD625i25, 1);
+    testTeletextInFrame(SdiFormat::SD625i25, 4);
+    CHECK(teletextLine(formatInfo(SdiFormat::SD525i2997), 1) == 0);
     std::printf("\n%d checks, %d failed\n", g_checks, g_failures);
     return g_failures ? 1 : 0;
 }

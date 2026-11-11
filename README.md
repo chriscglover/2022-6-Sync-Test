@@ -4,7 +4,9 @@ Two command-line tools for measuring video delay and lip sync through anything
 that carries SMPTE ST 2022-6/-7, SDI or NDI:
 
 - **`sender`** sends a test signal as ST 2022-6, as ST 2022-7 over
-  two paths, as SDI from a Blackmagic DeckLink, or as an NDI source.
+  two paths, as SDI from a Blackmagic DeckLink, or as an NDI source. On
+  ST 2022-6 it can also act as a NEWFOR subtitle databridge, inserting a
+  subtitler's captions as OP-47 (HD) or WST teletext (625-line SD).
 - **`probe`** receives it from ST 2022-6/-7, a Blackmagic DeckLink
   SDI input or an NDI source. It reports how late each frame arrives compared
   with a reference point, and how far the audio is from the video.
@@ -160,6 +162,72 @@ sender --format 1080p50 --ndi "Sync Test"
 same `--nmos-port` to keep a controller's existing route. If that port is still
 held, the node moves to the next free one and its sender gets a new ID.
 
+### Subtitles: NEWFOR databridge
+
+```bash
+# 1080i50 -7, accepting a NEWFOR subtitler on TCP port 1234
+sender --format 1080i50 --iface eth1 --group 239.10.1.1 \
+    --iface-b eth2 --group-b 239.10.2.1 --newfor 1234
+```
+
+`--newfor PORT` makes the sender the inserter end of a NEWFOR link. A
+subtitler (a subtitling workstation, playout automation or a test client)
+connects over TCP and sends CONNECT, BUILD, REVEAL and CLEAR. The sender puts
+each page on air as teletext in the outgoing ST 2022-6 stream:
+
+- **HD:** one OP-47 subtitling distribution packet (SMPTE RDD 8; DID 0x43,
+  SDID 0x02) per frame in the luma VANC, on line 575 of interlaced rasters or
+  line 12 of progressive ones. It carries the RDD 8 footer, sequence counter
+  and checksum.
+- **625-line SD:** the WST waveform itself (6.9375 Mbit/s, ITU-R BT.653 System
+  B) on the vertical blanking lines, ending on line 335. 525-line SD is not
+  supported.
+
+The transmission follows what broadcast inserters put on the wire:
+
+- **Packing:** one teletext packet per frame by default; `--ttx-packets N`
+  sends up to 5 per frame on HD and up to 16 on SD.
+- **Page cycle:** each REVEAL becomes the page header, then the rows, then a
+  header for the magazine's time-filling page (xFF), which tells a decoder the
+  page is complete.
+- **Header bits:** C6 (subtitle), C7 (suppress header) and C9 are set on every
+  header. C4 (erase) is set when the subtitler's BUILD asked for the page to be
+  cleared first.
+- **CLEAR:** an erase, which is the page header with C4 and no rows.
+- **Repeats:** the current caption, or the erase, is sent again every
+  `--ttx-repeat` seconds (default 2). A caption repeats with C4 clear, so a
+  decoder that joins late still shows it.
+- **Bursts:** commands that arrive before their page has started to go out are
+  merged into one transmission.
+- **Session end:** DISCONNECT, or the subtitler dropping the connection, takes
+  any caption off air.
+- **Page change:** a CONNECT to another page erases the caption on the old one.
+
+Options:
+
+| Option | Meaning |
+|---|---|
+| `--newfor PORT` | listen for a subtitler on this TCP port |
+| `--newfor-bind ADDR` | listen on one address only (default: all) |
+| `--newfor-page PAGE` | page to use before the subtitler's CONNECT (default 888) |
+| `--ttx-packets N` | teletext packets per frame (default 1) |
+| `--ttx-repeat S` | seconds between repeats (default 2; 0 = never) |
+
+The sender logs every command it receives (`[newfor] BUILD (clear) r22 "..."`).
+It accepts one subtitler at a time and sends nothing back. `--newfor` works
+with `--nmos` and ST 2022-7, but not with `--sdi` or `--ndi`.
+
+The NEWFOR protocol, as the sender reads it. `_H` is a Hamming 8/4 byte.
+Command bytes may carry odd parity (0x8F, 0x98).
+
+```
+CONNECT  0x0E 0x00 [mag_H] [tens_H] [units_H]       page; 999 = DISCONNECT
+BUILD    0x0F [ctl_H] { [row_hi_H] [row_lo_H] [40 bytes, odd parity] } x N
+         ctl bit 3 = clear before display, bits 2..0 = N
+REVEAL   0x10
+CLEAR    0x18
+```
+
 ## Receiving: probe
 
 Run it on a machine that can see the points you want to compare. It stamps
@@ -301,6 +369,11 @@ Without them the network and DeckLink paths still work; only `--ndi` and
 - **The marker time** is when the frame was due to leave the sending machine,
   by its clock. The probe does not use it; its delays come from its own
   arrival stamps.
+
+- **NEWFOR acknowledgements:** the sender never replies to the subtitler. The
+  NEWFOR client it was tested with reads nothing back either, and drives a
+  broadcast subtitle inserter that way. A subtitler that waits for an
+  acknowledgement after each command would not work with it.
 
 ## Releases
 

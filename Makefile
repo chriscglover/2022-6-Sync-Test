@@ -51,7 +51,7 @@ PCR_SRC := \
 AVX2_SRC := $(PCR)/common/src/bitpack_avx2.cpp
 
 # Picture, audio and raster composition: everything the self-tests exercise.
-LIB_SRC  := src/timecode.cpp src/overlay.cpp src/audio_embed.cpp src/composer.cpp
+LIB_SRC  := src/timecode.cpp src/overlay.cpp src/audio_embed.cpp src/teletext.cpp src/newfor.cpp src/composer.cpp
 # Needs GStreamer and the network.
 APP_SRC  := src/picture_source.cpp src/sender.cpp src/sdi_output.cpp src/main.cpp
 TEST_SRC := tests/test_main.cpp

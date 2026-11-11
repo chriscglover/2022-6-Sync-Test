@@ -31,6 +31,18 @@ WireLine wireLine(const SdiFormatInfo& fi, int line) {
     return w;
 }
 
+int maxTeletextPacketsPerFrame(const SdiFormatInfo& fi) {
+    if (fi.isHd) return 5;   // one OP-47 packet holds five
+    if (fi.totalLines == 625) return 16;   // lines 320..335
+    return 0;
+}
+
+int teletextLine(const SdiFormatInfo& fi, int packets) {
+    if (packets < 1 || packets > maxTeletextPacketsPerFrame(fi)) return 0;
+    if (fi.isHd) return fi.interlacedOnWire() ? 575 : 12;
+    return 336 - packets;
+}
+
 FrameComposer::FrameComposer(const ComposerSettings& settings)
     : settings_(settings),
       fi_(formatInfo(settings.format)),
@@ -76,7 +88,10 @@ std::span<const std::uint8_t> FrameComposer::compose(UyvyImage picture,
                                                      std::uint64_t captureUtcMs) {
     drawPicture(picture, frameIndex, captureUtcMs);
     audio_.embed(builder_, frameIndex, isFlash(frameIndex));
-    serialise(picture);
+    std::vector<TeletextPacket> teletext;
+    if (settings_.teletext)
+        teletext = settings_.teletext->takeFrame(settings_.teletextPacketsPerFrame);
+    serialise(picture, teletext);
     return {packed_.data(), packed_.size()};
 }
 
@@ -100,7 +115,37 @@ void FrameComposer::drawPicture(UyvyImage picture, std::uint64_t frameIndex,
     drawMarker(picture, settings_.runTag, std::uint32_t(frameIndex), captureUtcMs);
 }
 
-void FrameComposer::serialise(UyvyImage picture) {
+void FrameComposer::insertTeletext(const std::vector<TeletextPacket>& packets) {
+    if (packets.empty()) return;
+    const int first = teletextLine(fi_, int(packets.size()));
+    if (first == 0) return;
+    const std::size_t lw = std::size_t(lineWords_);
+    const std::size_t aw = std::size_t(fi_.activeWidth) * 2;
+    auto activeOf = [&](int line) { return wire_.data() + std::size_t(line - 1) * lw + (lw - aw); };
+
+    if (fi_.isHd) {
+        // One ST 291 packet in the luma stream at the start of the active line:
+        // ADF, DID 0x43, SDID 0x02, DC, the OP-47 bytes, checksum.
+        const std::vector<std::uint8_t> udw = op47Sdp(packets, sdpSequence_++);
+        std::vector<std::uint16_t> words;
+        words.reserve(udw.size() + 7);
+        words.insert(words.end(), {0x000, 0x3FF, 0x3FF, ancDataWord(0x43), ancDataWord(0x02),
+                                   ancDataWord(std::uint8_t(udw.size()))});
+        for (std::uint8_t b : udw) words.push_back(ancDataWord(b));
+        words.push_back(ancChecksum(words.data() + 3, 3 + udw.size()));
+        std::uint16_t* active = activeOf(first);
+        for (std::size_t i = 0; i < words.size(); ++i) active[1 + 2 * i] = words[i];
+        return;
+    }
+    // 625-line SD: each packet is its own line of teletext waveform in luma.
+    for (std::size_t i = 0; i < packets.size(); ++i) {
+        const auto luma = wstLine(packets[i]);
+        std::uint16_t* active = activeOf(first + int(i));
+        for (int k = 0; k < 720; ++k) active[1 + 2 * k] = luma[std::size_t(k)];
+    }
+}
+
+void FrameComposer::serialise(UyvyImage picture, const std::vector<TeletextPacket>& teletext) {
     const int lw = lineWords_;
     const int aw = fi_.activeWidth * 2;
     const int post = postActiveWords(fi_);   // EAV (+LN +CRC on HD)
@@ -138,6 +183,9 @@ void FrameComposer::serialise(UyvyImage picture) {
             for (int k = 0; k < aw; ++k) active[k] = (k & 1) ? kBlankLuma : kBlankChroma;
         }
     });
+
+    // Teletext over the blanking just written, before the CRCs cover it.
+    insertTeletext(teletext);
 
     // Pass 2 (HD): the CRC in each line's header covers the active picture that
     // precedes its EAV -- the tail of the previous wire line, wrapping to the

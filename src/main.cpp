@@ -16,7 +16,9 @@
 #include "pcapreplay/net_interfaces.h"
 #include "pcapreplay/net_multicast.h"
 #include "pcapreplay/nmos/nmos_node.h"
+#include "newfor.h"
 #include "sdi_output.h"
+#include "teletext.h"
 #include "sender.h"
 #include "version.h"
 #include "timecode.h"
@@ -156,6 +158,17 @@ void usage() {
 "                         GStreamer plugin and runtime (see README); not with\n"
 "                         --sdi or --nmos\n"
 "\n"
+"Subtitles (NEWFOR databridge)\n"
+"  --newfor PORT          accept a NEWFOR subtitler on TCP PORT and insert its\n"
+"                         subtitles as teletext: OP-47 on HD, WST in the VBI on\n"
+"                         625-line SD. ST 2022-6 output only; not 525-line SD\n"
+"  --newfor-bind ADDR     address to listen on (default: all interfaces)\n"
+"  --newfor-page PAGE     page before the subtitler's CONNECT (default 888)\n"
+"  --ttx-packets N        teletext packets per frame (default 1, as broadcast\n"
+"                         inserters send; HD up to 5, SD up to 16)\n"
+"  --ttx-repeat S         resend the current caption or erase every S seconds\n"
+"                         (default 2; 0 = never)\n"
+"\n"
 "NMOS\n"
 "  --nmos                 register as an IS-04 sender and serve IS-05\n"
 "  --nmos-port N          node API port             (default 3210)\n"
@@ -183,6 +196,9 @@ int main(int argc, char** argv) {
     double flashEvery = 2.0, reportInterval = 2.0;
     int port = 40000, nmosPort = 3210, sdiDevice = -1;
     std::string ndiName;
+    int newforPort = 0, ttxPackets = 1;
+    std::string newforBind, newforPage = "888";
+    double ttxRepeat = 2.0;
     bool wantNmos = false, peerToPeer = true, idle = false, haveRunTag = false;
 
     for (int i = 1; i < argc; ++i) {
@@ -212,6 +228,11 @@ int main(int argc, char** argv) {
         else if (a == "--seconds")      cfg.maxSeconds = std::atof(val().c_str());
         else if (a == "--sdi")          sdiDevice = std::atoi(val().c_str());
         else if (a == "--ndi")          ndiName = val();
+        else if (a == "--newfor")       newforPort = std::atoi(val().c_str());
+        else if (a == "--newfor-bind")  newforBind = val();
+        else if (a == "--newfor-page")  newforPage = val();
+        else if (a == "--ttx-packets")  ttxPackets = std::atoi(val().c_str());
+        else if (a == "--ttx-repeat")   ttxRepeat = std::atof(val().c_str());
         else if (a == "--nmos")         wantNmos = true;
         else if (a == "--nmos-port")    nmosPort = std::atoi(val().c_str());
         else if (a == "--nmos-iface")   nmosIfaceArg = val();
@@ -272,6 +293,51 @@ int main(int argc, char** argv) {
     if (!haveRunTag) {
         std::random_device rd;
         cfg.composer.runTag = (std::uint64_t(rd()) << 32) ^ rd();
+    }
+
+    // ---- NEWFOR databridge ---------------------------------------------------
+    std::unique_ptr<NewforServer> newfor;
+    if (newforPort != 0) {
+        if (sdiDevice >= 0 || !ndiName.empty()) {
+            std::printf("--newfor inserts teletext into the ST 2022-6 output; it cannot be used with --%s\n",
+                        ndiName.empty() ? "sdi" : "ndi");
+            return 2;
+        }
+        if (newforPort < 1 || newforPort > 65535) {
+            std::printf("--newfor wants a TCP port, 1 to 65535\n");
+            return 2;
+        }
+        const int maxPackets = maxTeletextPacketsPerFrame(fi);
+        if (maxPackets == 0) {
+            std::printf("--newfor: %s cannot carry teletext subtitles (HD and 625-line SD can)\n",
+                        formatDescription(fi.id).c_str());
+            return 2;
+        }
+        if (ttxPackets < 1 || ttxPackets > maxPackets) {
+            std::printf("--ttx-packets must be 1 to %d on %s\n", maxPackets, fi.name);
+            return 2;
+        }
+        if (ttxRepeat < 0.0) {
+            std::printf("--ttx-repeat must be 0 or more seconds\n");
+            return 2;
+        }
+        int page = 0;
+        if (newforPage.size() != 3 || newforPage[0] < '1' || newforPage[0] > '8' ||
+            !std::isxdigit(static_cast<unsigned char>(newforPage[1])) ||
+            !std::isxdigit(static_cast<unsigned char>(newforPage[2]))) {
+            std::printf("--newfor-page wants a teletext page, 100 to 8FF\n");
+            return 2;
+        }
+        page = int(std::strtol(newforPage.c_str(), nullptr, 16));
+        cfg.composer.teletext = std::make_shared<TeletextPager>(
+            int(ttxRepeat * fi.frameRate() + 0.5), page);
+        cfg.composer.teletextPacketsPerFrame = ttxPackets;
+        newfor = std::make_unique<NewforServer>(*cfg.composer.teletext);
+        std::string err;
+        if (!newfor->start(newforBind, newforPort, true, err)) {
+            std::printf("error: %s\n", err.c_str());
+            return 1;
+        }
     }
 
     // ---- DeckLink SDI output ------------------------------------------------
@@ -374,6 +440,12 @@ int main(int argc, char** argv) {
     std::printf("run tag    : %llu (0x%016llx)\n",
                 static_cast<unsigned long long>(cfg.composer.runTag),
                 static_cast<unsigned long long>(cfg.composer.runTag));
+    if (newfor)
+        std::printf("subtitles  : NEWFOR on %s:%d -> page %X, %s line %d, %d packet(s)/frame, repeat %s\n",
+                    newforBind.empty() ? "0.0.0.0" : newforBind.c_str(), newforPort,
+                    cfg.composer.teletext->page(), fi.isHd ? "OP-47 on" : "WST from",
+                    teletextLine(fi, ttxPackets), ttxPackets,
+                    ttxRepeat > 0.0 ? (std::to_string(ttxRepeat).substr(0, 4) + " s").c_str() : "off");
 
     std::mutex controlMutex;
     std::unique_ptr<nmos::NmosBackend> node(nmos::createBuiltinBackend());
@@ -526,6 +598,7 @@ int main(int argc, char** argv) {
     }
 
     sender.stop();
+    if (newfor) newfor->stop();
     if (wantNmos) node->stop();
     return exitCode;
 }
