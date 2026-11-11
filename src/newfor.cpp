@@ -89,11 +89,16 @@ void NewforParser::execute(std::size_t /*length*/) {
                 say("DISCONNECT");
                 return;
             }
-            const int page = ((mag == 0 ? 8 : mag) << 8) | (tens << 4) | units;
-            if (mag > 8) {
-                say("CONNECT to magazine " + std::to_string(mag) + ", ignored");
+            // NEWFOR sends the magazine as its digit, 1 to 8 (page 888 is D0 D0 D0).
+            // FAB Subtitler follows CONNECT 888 with CONNECT 000 at the start of
+            // every session; a real inserter keeps its page, so this does too.
+            // Magazine 0 is not 8 here: that is teletext packet addressing.
+            if (mag == 0 || mag > 8) {
+                say("CONNECT page " + std::to_string(mag) + std::to_string(tens) + std::to_string(units) +
+                    " is not a page, keeping " + pageText(pager_.page()));
                 return;
             }
+            const int page = (mag << 8) | (tens << 4) | units;
             pager_.connect(page);
             say("CONNECT page " + pageText(page));
             return;

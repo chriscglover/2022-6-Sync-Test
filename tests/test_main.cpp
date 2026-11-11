@@ -596,6 +596,27 @@ void testNewforParser() {
     out = drain(pager, 10);
     CHECK(out.size() == 2 && !out.empty() && out[0].erase);   // merged: the caption never went out
     CHECK(parser.unknownBytes() == 0);
+
+    // FAB Subtitler opens every session with CONNECT 888 then CONNECT 000
+    // (newfor.pcap, 2026-11-11). The page must stay 888.
+    std::printf("NEWFOR: FAB's CONNECT 000 keeps the page\n");
+    TeletextPager fabPager(0, 0x888);
+    NewforParser fab(fabPager, [&](const std::string& s) { log.push_back(s); });
+    const std::vector<std::uint8_t> fabOpen = {
+        0x0E, 0x15, 0xD0, 0xD0, 0xD0,                                // CONNECT 888
+        0x0E, 0x15, 0x15, 0x15, 0x15,                                // CONNECT 000
+        0x98,                                                        // CLEAR
+    };
+    fab.feed(fabOpen);
+    stream.clear();
+    add(newforBuild(true, {{22, cellsOf("DEMO White/Black SH Bottom Left")}}));
+    add({0x10});
+    fab.feed(stream);
+    CHECK(fabPager.page() == 0x888);
+    CHECK(fab.commands() == 5);
+    CHECK(!log.empty() && log.back() == "REVEAL");
+    out = drain(fabPager, 10);
+    CHECK(!out.empty() && out[0].page == 0x888);
 }
 
 // The SD slicer, restated: 1.945945 samples a bit, linear interpolation, a

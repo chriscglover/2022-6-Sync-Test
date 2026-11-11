@@ -205,6 +205,9 @@ The transmission follows what broadcast inserters put on the wire:
 - **Session end:** DISCONNECT, or the subtitler dropping the connection, takes
   any caption off air.
 - **Page change:** a CONNECT to another page erases the caption on the old one.
+- **CONNECT 000:** FAB Subtitler sends CONNECT 888 and then CONNECT 000 at the
+  start of every session. A magazine of 0 is not a page, so the sender ignores
+  it and keeps the page it has.
 
 Options:
 
