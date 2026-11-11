@@ -20,7 +20,9 @@ public:
     PictureSource(const PictureSource&) = delete;
     PictureSource& operator=(const PictureSource&) = delete;
 
-    bool open(int width, int height, int frameRateNum, int frameRateDen, std::string& error);
+    // `backgroundRgb` (0xRRGGBB) fills everything but the ball.
+    bool open(int width, int height, int frameRateNum, int frameRateDen, std::uint32_t backgroundRgb,
+              std::string& error);
     void close();
 
     // Copy the next picture into `dst`: UYVY, stride width * 2.

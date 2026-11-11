@@ -39,6 +39,7 @@ struct ComposerSettings {
     int           flashFrames = 1;
     std::int64_t  timecodeStartFrames = 0;  // timecode shown on frame 0
     std::string   title = "VIDEO TEST SIGNAL";
+    std::uint32_t backgroundRgb = 0x000000;  // behind the ball, 0xRRGGBB
     std::uint64_t runTag = 0;
     // Teletext subtitles to insert, or null for none: OP-47 in luma VANC on HD,
     // the WST waveform on the blanking lines of 625-line SD.

@@ -167,7 +167,8 @@ void SdiOutput::run(SdiOutputConfig cfg) {
 
     PictureSource source;
     std::string err;
-    if (!source.open(fi.activeWidth, fi.activeHeight, fi.frameRateNum, fi.frameRateDen, err)) {
+    if (!source.open(fi.activeWidth, fi.activeHeight, fi.frameRateNum, fi.frameRateDen,
+                     cfg.composer.backgroundRgb, err)) {
         fail(err);
         return;
     }

@@ -108,7 +108,8 @@ void Sender::run(SenderConfig cfg) {
     std::thread producer([&] {
         std::string err;
         PictureSource source;
-        if (!source.open(fi.activeWidth, fi.activeHeight, fi.frameRateNum, fi.frameRateDen, err)) {
+        if (!source.open(fi.activeWidth, fi.activeHeight, fi.frameRateNum, fi.frameRateDen,
+                         cfg.composer.backgroundRgb, err)) {
             std::lock_guard<std::mutex> lk(ringMutex);
             producerError = err;
             producerDone = true;

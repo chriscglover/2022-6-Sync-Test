@@ -135,6 +135,19 @@ void drawText(UyvyImage img, int x, int y, int scale, const std::string& text,
     }
 }
 
+bool parseRgb(const std::string& text, std::uint32_t& rgb) {
+    const std::string hex = !text.empty() && text[0] == '#' ? text.substr(1) : text;
+    if (hex.size() != 6 || hex.find_first_not_of("0123456789abcdefABCDEF") != std::string::npos)
+        return false;
+    rgb = std::uint32_t(std::stoul(hex, nullptr, 16));
+    return true;
+}
+
+int videoLuma(std::uint32_t rgb) {
+    const double r = (rgb >> 16) & 0xFF, g = (rgb >> 8) & 0xFF, b = rgb & 0xFF;
+    return int(16.0 + 219.0 * (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255.0 + 0.5);
+}
+
 int drawLabel(UyvyImage img, int y, int wantedScale, const std::string& text) {
     const int pad = std::max(2, wantedScale);
     const int scale = fitScale(text, wantedScale, img.width - 4 * pad);

@@ -38,6 +38,14 @@ int  fitScale(const std::string& text, int wanted, int maxWidth);
 void drawText(UyvyImage img, int x, int y, int scale, const std::string& text,
               std::uint8_t luma);
 
+// A background colour written RRGGBB (a leading '#' is allowed), as 0xRRGGBB.
+bool parseRgb(const std::string& text, std::uint32_t& rgb);
+// Its BT.709 luma on the 8-bit video scale: 16 is black, 235 white.
+int  videoLuma(std::uint32_t rgb);
+// The brightest background the probe still finds the flash against: the flash
+// must lift every picture sample by more than 80 and the mean by more than 60.
+inline constexpr int kMaxBackgroundY = 150;
+
 // White text on a black box, centred horizontally with its top at `y`.
 // Returns the box height.
 int  drawLabel(UyvyImage img, int y, int wantedScale, const std::string& text);
