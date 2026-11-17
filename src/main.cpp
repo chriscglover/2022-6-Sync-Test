@@ -618,7 +618,8 @@ int main(int argc, char** argv) {
                         s.targetPps > 0 ? 100.0 * s.achievedPps / s.targetPps : 0.0, s.wireMbps,
                         static_cast<unsigned long long>(s.repeatedFrames), s.maxLatenessUs / 1000.0,
                         s.audioOverflowPackets ? "  AUDIO OVERFLOW" : "",
-                        s.gridRealigns ? ("  REALIGNED x" + std::to_string(s.gridRealigns)).c_str() : "");
+                        s.gridRealigns ? ("  REALIGNED x" + std::to_string(s.gridRealigns) + ", " +
+                                          std::to_string(s.skippedFrames) + " frames skipped").c_str() : "");
             std::fflush(stdout);
         }
     }

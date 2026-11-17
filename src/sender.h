@@ -59,6 +59,7 @@ struct SenderStatus {
     std::int64_t  taiOffsetS = 0;
     bool          taiOffsetFromKernel = false;
     std::uint64_t gridRealigns = 0;
+    std::uint64_t skippedFrames = 0;
     std::string   timecode;              // on the frame most recently started
     std::uint64_t audioOverflowPackets = 0;
     std::uint64_t runTag = 0;
