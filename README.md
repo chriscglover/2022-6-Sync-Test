@@ -406,10 +406,13 @@ Without them the network and DeckLink paths still work; only `--ndi` and
   the timestamps only when the system clock follows PTP, through phc2sys or
   chrony with a PHC refclock. TAI - UTC comes from the kernel; when the kernel
   has none, 37 s is assumed. The start banner says which. The HBRMT R field is 3.
-- **Falling behind:** a machine that cannot keep up skips whole frame slots,
-  rather than sending late frames with stale timestamps. The status line then
-  shows `REALIGNED xN` and a packet rate below 100%. Burnt-in time-of-day
-  timecode is not adjusted for the skipped frames.
+- **Frame timing:** each frame starts at its own grid instant, read afresh from
+  the system clock, and its datagrams are spread evenly across the frame period
+  from there. A frame whose whole slot has passed (a stalled machine, or a clock
+  step) is skipped rather than sent late. The status line then shows
+  `REALIGNED xN, M frames skipped` and a packet rate below 100%. FRCount and the
+  timestamps both jump by the skipped frames. Burnt-in time-of-day timecode is
+  not adjusted for them.
 - **Interlaced motion:** interlaced frames carry the same picture in both fields,
   so the ball moves once per frame, not once per field.
 - **SD markers over SDI:** at 625 and 525 lines each marker cell is only 2
