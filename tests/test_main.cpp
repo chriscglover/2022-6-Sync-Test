@@ -771,6 +771,23 @@ void testSt2059Grid() {
     CHECK(g2997.videoTimestamp(k2997) == 3169447248u);
     CHECK(g2997.frameStartNs(k2997) == 1'794'000'000'159'033'333ull);
 
+    // Per datagram, as real kit sends it: 1080i25 (7,425,000 media bytes a
+    // frame) steps 200 RTP ticks and 1101 words a datagram; 1080p50 100 ticks.
+    const std::uint64_t bits1080 = 7'425'000ull * 8;
+    const std::uint64_t dg = 1376 * 8;
+    CHECK(g25.rtpOffset(0, bits1080) == 0);
+    CHECK(g25.rtpOffset(dg, bits1080) == 200);
+    CHECK(g50.rtpOffset(dg, bits1080) == 100);
+    CHECK(St2059Grid::videoWordOffset(0) == 0);
+    CHECK(St2059Grid::videoWordOffset(dg) == 1101);       // first complete word: ceil(1100.8)
+    CHECK(St2059Grid::videoWordOffset(2 * dg) == 2202);   // 2201.6 -> 2202
+    // The last datagram (5396) stays inside the frame: below the next frame's stamps.
+    CHECK(g25.rtpOffset(5396 * dg, bits1080) < 1'080'000);
+    CHECK(g25.rtpOffset(5396 * dg, bits1080) == 1'079'984);
+    CHECK(St2059Grid::videoWordOffset(5396 * dg) < 5'940'000);
+    // 59.94: exact rate, 450,450 ticks a frame, the last datagram short of it.
+    CHECK(g5994.rtpOffset(5396 * dg, bits1080) < 450'450);
+
     // UTC <-> TAI.
     CHECK(g25.taiFromUtcNs(0) == 37 * St2059Grid::kNs);
     CHECK(g25.utcFromTaiNs(g25.taiFromUtcNs(1'234'567'890'123)) == 1'234'567'890'123);

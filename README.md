@@ -399,7 +399,9 @@ Without them the network and DeckLink paths still work; only `--ndi` and
   packets). Receivers assume 48 kHz synchronous audio without them.
 - **Timing follows the system clock:** frames sit on the ST 2059-1 grid,
   and the RTP timestamp (27 MHz) and HBRMT video timestamp (148.5 MHz, or
-  148.5/1.001) are each frame's place on it, counted from the PTP epoch. The
+  148.5/1.001) are each frame's place on it, counted from the PTP epoch. Within
+  a frame both advance per datagram by its position in the frame, as ST 2022-6
+  equipment does: at 1080i50, 200 RTP ticks and about 1101 words a datagram. The
   sender does not read PTP itself. A PTP-locked analyser therefore agrees with
   the timestamps only when the system clock follows PTP, through phc2sys or
   chrony with a PHC refclock. TAI - UTC comes from the kernel; when the kernel
