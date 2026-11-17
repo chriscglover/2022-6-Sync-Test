@@ -61,6 +61,21 @@ public:
         return std::uint32_t((unsigned __int128)index * den_ * clockNum_ / (num_ * clockDen_));
     }
 
+    // ST 2022-6 timestamps each datagram, not just the frame. A datagram that
+    // starts `bitOffset` bits into a frame of `frameBits` media bits carries:
+    //  - an RTP timestamp that many bits later in 27 MHz ticks (the bit's time
+    //    within the frame period), and
+    //  - an HBRMT video timestamp at the first complete 10-bit word it carries.
+    // Both are added to the frame's own timestamps. Real kit and the HBRMT
+    // video timestamp rule both advance per datagram: 1080i50 steps ~200 RTP
+    // ticks and ~1101 words a datagram.
+    std::uint32_t rtpOffset(std::uint64_t bitOffset, std::uint64_t frameBits) const {
+        return std::uint32_t((unsigned __int128)bitOffset * den_ * kRtpHz / ((unsigned __int128)num_ * frameBits));
+    }
+    static std::uint32_t videoWordOffset(std::uint64_t bitOffset) {
+        return std::uint32_t((bitOffset + 9) / 10);
+    }
+
     // UTC nanoseconds (CLOCK_REALTIME) <-> TAI nanoseconds on the PTP timeline.
     std::uint64_t taiFromUtcNs(std::int64_t utcNs) const {
         const std::int64_t tai = utcNs + taiOffsetS_ * std::int64_t(kNs);

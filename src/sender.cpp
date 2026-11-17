@@ -85,6 +85,7 @@ void Sender::run(SenderConfig cfg) {
     if (fi.id == SdiFormat::Unknown) { fail("unsupported format"); return; }
 
     const std::size_t frameBytes = std::size_t(fi.bytesPerFrame());
+    const std::uint64_t frameBits = std::uint64_t(frameBytes) * 8;
     const std::uint64_t dgPerFrame =
         (std::uint64_t(frameBytes) + kHbrmtPayloadBytes - 1) / kHbrmtPayloadBytes;
     const double pps = double(dgPerFrame) * fi.frameRate();
@@ -301,11 +302,13 @@ void Sender::run(SenderConfig cfg) {
 
             RtpHeader rtp;
             rtp.sequence  = seq++;
-            rtp.timestamp = grid.rtpTimestamp(gridIndex);
+            // Per datagram, by its bit position in the frame (ST 2022-6).
+            const std::uint64_t bitOffset = idxInFrame * kHbrmtPayloadBytes * 8;
+            rtp.timestamp = grid.rtpTimestamp(gridIndex) + grid.rtpOffset(bitOffset, frameBits);
             rtp.ssrc      = cfg.ssrc;
             rtp.marker    = (idxInFrame + 1 == dgPerFrame);
             hb.frCount = std::uint8_t(frameIndex);
-            hb.videoTimestamp = grid.videoTimestamp(gridIndex);
+            hb.videoTimestamp = grid.videoTimestamp(gridIndex) + St2059Grid::videoWordOffset(bitOffset);
 
             // Frame-aligned, the tail datagram zero-padded, as PCAP Replay sends.
             std::uint8_t chunk[kHbrmtPayloadBytes];
