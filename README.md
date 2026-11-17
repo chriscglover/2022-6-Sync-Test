@@ -15,6 +15,38 @@ Connect the sender straight to the probe to check the pair: the delay is the
 network path, and lip sync is 0 ms. Then put a system in between and measure
 it.
 
+## Requirements
+
+Linux on x86-64. Both tools use GStreamer from the distribution; nothing else
+is needed for ST 2022-6/-7. DeckLink and NDI are optional and need their own
+GStreamer plugin and vendor runtime.
+
+Package names are for Debian and Ubuntu; checked on a clean Ubuntu 26.04.
+
+| To... | Install |
+|---|---|
+| **Run** the release binaries (ST 2022-6/-7 send and receive) | `libgstreamer1.0-0` `gstreamer1.0-plugins-base` |
+| **Build** from source | the above, plus `build-essential` `pkg-config` `libgstreamer1.0-dev` `libgstreamer-plugins-base1.0-dev` |
+| Use **DeckLink** SDI (`sender --sdi`, probe `sdi:`) | `gstreamer1.0-plugins-bad`, plus Blackmagic Desktop Video; see [Blackmagic DeckLink](#blackmagic-decklink) |
+| Use **NDI** (`sender --ndi`, probe `ndi:`) | the NDI plugin from gst-plugins-rs (not packaged) and the NDI runtime; see [NDI](#ndi) |
+| Run the `gst-inspect-1.0` checks below | `gstreamer1.0-tools` |
+
+To run the release binaries:
+
+```bash
+sudo apt install libgstreamer1.0-0 gstreamer1.0-plugins-base
+```
+
+`gstreamer1.0-plugins-base` brings `libgstreamer-plugins-base1.0-0`, which holds
+the `libgstapp` and `libgstvideo` libraries the tools link against, and the
+`videotestsrc`, `videoconvert`, `audioconvert`, `appsrc` and `appsink`
+elements they use. Without it the tools stop at once with
+`error while loading shared libraries: libgstapp-1.0.so.0`.
+
+The release binaries also need a glibc at least as new as the one they were
+built against (Ubuntu 26.04, glibc 2.43). On an older system, build from
+source.
+
 ## What the sender sends
 
 **Picture:** every raster the format table supports (1080i/p, 720p, 625i and
@@ -62,7 +94,7 @@ LN words. 525-line SD uses the SMPTE 125M field edges, bottom field first.
 
 ## Build
 
-Linux, x86-64:
+Install the build packages listed under [Requirements](#requirements), then:
 
 ```bash
 sudo apt install build-essential pkg-config \
@@ -75,9 +107,8 @@ sudo make install  # optional, to /usr/local/bin
 For DeckLink output and capture, see [Blackmagic DeckLink](#blackmagic-decklink).
 For NDI output and receive, see [NDI](#ndi).
 
-On another machine the binaries need only the GStreamer runtime
-(`libgstreamer1.0-0` and `gstreamer1.0-plugins-base`); the C++ runtime is
-linked in.
+On another machine the binaries need only the runtime packages under
+[Requirements](#requirements); the C++ runtime is linked in.
 
 The raster, HBRMT, pacing, multicast and NMOS code comes from PCAP Replay 1.8.1;
 see `third_party/pcapreplay/VENDORED.md`.
@@ -304,7 +335,11 @@ loads Blackmagic's driver library while it runs.
    `libDeckLinkAPI.so`; on Debian and Ubuntu the package is `desktopvideo`,
    which puts the library at `/usr/lib/libDeckLinkAPI.so`.
 2. **GStreamer's `decklink` plugin**, in `gstreamer1.0-plugins-bad` on Debian
-   and Ubuntu.
+   and Ubuntu:
+
+   ```bash
+   sudo apt install gstreamer1.0-plugins-bad
+   ```
 
 **Where the library is looked for:** the plugin loads `libDeckLinkAPI.so` by
 name when a DeckLink element starts, not when the tools start. The system's
@@ -317,7 +352,7 @@ normal library search applies:
 If Desktop Video put the library somewhere else, add that directory to
 `LD_LIBRARY_PATH` or to `/etc/ld.so.conf.d/` and run `ldconfig`.
 
-**Checking the installation:**
+**Checking the installation** (`gst-inspect-1.0` is in `gstreamer1.0-tools`):
 
 ```bash
 ls -l /usr/lib/libDeckLinkAPI.so          # or wherever Desktop Video put it
@@ -348,7 +383,7 @@ loads the NDI runtime while it runs.
    it; build it from gst-plugins-rs, or copy a build you already have into a
    directory and point `GST_PLUGIN_PATH` at it.
 
-**Checking the installation:**
+**Checking the installation** (`gst-inspect-1.0` is in `gstreamer1.0-tools`):
 
 ```bash
 gst-inspect-1.0 ndisink       # the plugin is present
@@ -387,8 +422,8 @@ also print it when they start.
 **Tags:** releases are tagged `v<version>`, for example `v1.0.0`.
 
 **Release builds:** each GitHub release carries an x86-64 Linux build of both
-tools. The target machine needs the GStreamer runtime listed under
-[Build](#build) and a glibc at least as new as the one it was built against
+tools. The target machine needs the runtime packages listed under
+[Requirements](#requirements) and a glibc at least as new as the one it was built against
 (Ubuntu 26.04, glibc 2.43).
 
 ## Licence
