@@ -54,6 +54,11 @@ struct SenderStatus {
     double        wireMbps = 0.0;
     double        maxLatenessUs = 0.0;
     std::int64_t  pacerResyncs = 0;
+    // ST 2059-1 grid: TAI - UTC used, whether the kernel supplied it, and how
+    // often the sender skipped or waited to get back onto its frame slots.
+    std::int64_t  taiOffsetS = 0;
+    bool          taiOffsetFromKernel = false;
+    std::uint64_t gridRealigns = 0;
     std::string   timecode;              // on the frame most recently started
     std::uint64_t audioOverflowPackets = 0;
     std::uint64_t runTag = 0;

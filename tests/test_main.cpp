@@ -21,6 +21,7 @@
 #include "newfor.h"
 #include "teletext.h"
 #include "decklink_modes.h"
+#include "genlock.h"
 #include "overlay.h"
 #include "pcapreplay/bitpack.h"
 #include "pcapreplay/crc.h"
@@ -730,6 +731,53 @@ void testTeletextInFrame(SdiFormat format, int perFrame) {
     }
 }
 
+// ST 2059-1: frame k of num/den starts k*den/num s after the PTP epoch, with
+// its RTP timestamp that instant on 27 MHz. Large-index values were computed
+// independently with arbitrary-precision integers.
+void testSt2059Grid() {
+    std::printf("ST 2059-1 grid\n");
+    const St2059Grid g25(25, 1, 148'500'000, 1, 37);
+    CHECK(g25.frameStartNs(3) == 120'000'000);
+    CHECK(g25.indexAtOrAfter(120'000'000) == 3);
+    CHECK(g25.indexAtOrAfter(120'000'001) == 4);
+    CHECK(g25.rtpTimestamp(1) - g25.rtpTimestamp(0) == 1'080'000);       // 27 MHz / 25
+    CHECK(g25.videoTimestamp(1) - g25.videoTimestamp(0) == 5'940'000);   // 148.5 MHz / 25
+    const std::uint64_t k25 = 1'794'000'000ull * 25 + 7;                  // late 2026
+    CHECK(g25.rtpTimestamp(k25) == 3088366400u);
+    CHECK(g25.videoTimestamp(k25) == 4101113312u);
+    CHECK(std::uint32_t(g25.rtpTimestamp(k25 + 1) - g25.rtpTimestamp(k25)) == 1'080'000);
+
+    const St2059Grid g50(50, 1, 148'500'000, 1, 37);
+    CHECK(g50.rtpTimestamp(3) == 1'620'000);
+
+    // 59.94: exact over 60,000 frames, 450,450 RTP ticks and 2,475,000 CF ticks a frame.
+    const St2059Grid g5994(60000, 1001, 148'500'000'000ull, 1001, 37);
+    CHECK(g5994.frameStartNs(60'000) == 1'001ull * St2059Grid::kNs);
+    CHECK(g5994.indexAtOrAfter(1'001ull * St2059Grid::kNs) == 60'000);
+    CHECK(g5994.rtpTimestamp(2) - g5994.rtpTimestamp(1) == 450'450);
+    CHECK(g5994.videoTimestamp(2) - g5994.videoTimestamp(1) == 2'475'000);
+
+    // 29.97: 900,900.9 ticks a frame, so steps of 900,900 and 900,901 that never drift.
+    const St2059Grid g2997(30000, 1001, 148'500'000'000ull, 1001, 37);
+    bool stepsOk = true;
+    for (std::uint64_t k = 0; k < 30'000; ++k) {
+        const std::uint32_t d = g2997.rtpTimestamp(k + 1) - g2997.rtpTimestamp(k);
+        stepsOk = stepsOk && (d == 900'900 || d == 900'901);
+    }
+    CHECK(stepsOk);
+    CHECK(std::uint64_t(g2997.rtpTimestamp(30'000)) == 1001ull * 27'000'000 % (1ull << 32));
+    const std::uint64_t k2997 = 53'766'233'771ull;
+    CHECK(g2997.rtpTimestamp(k2997) == 3085100300u);
+    CHECK(g2997.videoTimestamp(k2997) == 3169447248u);
+    CHECK(g2997.frameStartNs(k2997) == 1'794'000'000'159'033'333ull);
+
+    // UTC <-> TAI.
+    CHECK(g25.taiFromUtcNs(0) == 37 * St2059Grid::kNs);
+    CHECK(g25.utcFromTaiNs(g25.taiFromUtcNs(1'234'567'890'123)) == 1'234'567'890'123);
+    const St2059Grid noCf(25, 1, 0, 1, 37);
+    CHECK(noCf.videoTimestamp(5) == 0);
+}
+
 }  // namespace
 
 int main() {
@@ -739,6 +787,7 @@ int main() {
     testBackgroundColour();
     testSt299Ecc();
     testDeckLinkModes();
+    testSt2059Grid();
     // Four groups (the default, 16 channels) must fit every raster's HANC.
     testFormat(SdiFormat::HD1080i25, 3, 1);
     testFormat(SdiFormat::HD1080i25, 3, 4);

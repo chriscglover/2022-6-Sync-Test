@@ -7,6 +7,7 @@
 #include <ctime>
 #include <vector>
 
+#include "genlock.h"
 #include "pcapreplay/hbrmt.h"
 #include "pcapreplay/net_multicast.h"
 #include "pcapreplay/pacer.h"
@@ -89,7 +90,21 @@ void Sender::run(SenderConfig cfg) {
     const double pps = double(dgPerFrame) * fi.frameRate();
     const double frameSeconds = double(fi.frameRateDen) / double(fi.frameRateNum);
 
-    const Clock::time_point t0 = Clock::now() + kPreroll;
+    // Frames sit on the ST 2059-1 grid: frame 0 is the first frame period that
+    // starts after the preroll, by the system clock taken as PTP time, and
+    // every RTP / video timestamp is its frame's place on that grid.
+    const std::int64_t kernelTaiOffset = St2059Grid::kernelTaiOffsetS();
+    const std::uint64_t cfClockNum = fi.cfCode == 2 ? 148'500'000ull : (fi.cfCode == 1 ? 148'500'000'000ull : 0);
+    const std::uint64_t cfClockDen = fi.cfCode == 1 ? 1001 : 1;
+    const St2059Grid grid(std::uint64_t(fi.frameRateNum), std::uint64_t(fi.frameRateDen), cfClockNum, cfClockDen,
+                          kernelTaiOffset ? kernelTaiOffset : St2059Grid::kDefaultTaiOffsetS);
+    auto utcPoint = [&](std::uint64_t gridIndex) {
+        return Clock::time_point(std::chrono::duration_cast<Clock::duration>(
+            std::chrono::nanoseconds(grid.utcFromTaiNs(grid.frameStartNs(gridIndex)))));
+    };
+    const std::uint64_t firstGridIndex = grid.indexAtOrAfter(grid.taiFromUtcNs(
+        St2059Grid::utcNowNs() + std::chrono::duration_cast<std::chrono::nanoseconds>(kPreroll).count()));
+    const Clock::time_point t0 = utcPoint(firstGridIndex);
     if (cfg.timecodeFromTimeOfDay)
         cfg.composer.timecodeStartFrames =
             timeOfDayFrames(t0, timecodeRate(fi.frameRateNum, fi.frameRateDen));
@@ -193,9 +208,12 @@ void Sender::run(SenderConfig cfg) {
     // ---- transmit -----------------------------------------------------------
     HbrmtHeader hb = hbrmtForFormat(fi);
     hb.r = std::uint8_t(cfg.ref);
-    const double cfHz = hb.cf == 2 ? 148.5e6 : (hb.cf == 1 ? 148.5e6 / 1.001 : 0.0);
-    const std::uint32_t videoTicks = cfHz > 0.0 ? std::uint32_t(cfHz / fi.frameRate() + 0.5) : 0;
-    const std::uint32_t rtpStep = rtpTicksPerFrame(fi.frameRateNum, fi.frameRateDen);
+    // Past this, the sender has fallen too far behind its grid slots (a stalled
+    // transmit thread) or the clock has stepped: skip to the current slot rather
+    // than send frames whose timestamps no longer match when they leave.
+    const std::int64_t frameNs = std::int64_t(grid.frameStartNs(1'000'000) / 1'000'000);
+    const std::int64_t realignLateNs = std::max<std::int64_t>(4 * frameNs, 100'000'000);
+    const std::int64_t realignEarlyNs = frameNs;
 
     // Frame 0 leaves when its marker says it does.
     std::this_thread::sleep_until(t0);
@@ -212,6 +230,8 @@ void Sender::run(SenderConfig cfg) {
         status_.formatText = formatDescription(fi.id);
         status_.targetPps = pps;
         status_.runTag = cfg.composer.runTag;
+        status_.taiOffsetS = grid.taiOffsetS();
+        status_.taiOffsetFromKernel = kernelTaiOffset != 0;
         auto describe = [](const SenderPath& p) {
             std::string s = p.group + ":" + std::to_string(p.port);
             if (!p.interfaceIp.empty()) s += "  via " + p.interfaceIp;
@@ -229,6 +249,10 @@ void Sender::run(SenderConfig cfg) {
     std::vector<std::uint8_t> batch(std::size_t(burstMax) * kDatagramBytes);
     const std::uint8_t* frame = nullptr;
     std::uint64_t streamPos = 0, sent = 0, repeats = 0, framesTaken = 0;
+    // Grid index of the frame being sent = its stream frame index + gridBase.
+    std::int64_t gridBase = std::int64_t(firstGridIndex);
+    std::uint64_t realigns = 0;
+    const auto runStart = std::chrono::steady_clock::now();
     std::uint16_t seq = 0;
     bool completed = false;
     std::string failure;
@@ -246,10 +270,18 @@ void Sender::run(SenderConfig cfg) {
         if (credit <= 0) continue;
 
         int built = 0;
+        bool realign = false;
         for (; built < credit; ++built) {
             const std::uint64_t frameIndex = streamPos / dgPerFrame;
             const std::uint64_t idxInFrame = streamPos % dgPerFrame;
+            const std::uint64_t gridIndex = std::uint64_t(std::int64_t(frameIndex) + gridBase);
             if (idxInFrame == 0) {
+                const std::int64_t lateNs = std::int64_t(grid.taiFromUtcNs(St2059Grid::utcNowNs())) -
+                                            std::int64_t(grid.frameStartNs(gridIndex));
+                if (lateNs > realignLateNs || lateNs < -realignEarlyNs) {
+                    realign = true;
+                    break;
+                }
                 bool advanced = false;
                 {
                     std::lock_guard<std::mutex> lk(ringMutex);
@@ -269,11 +301,11 @@ void Sender::run(SenderConfig cfg) {
 
             RtpHeader rtp;
             rtp.sequence  = seq++;
-            rtp.timestamp = std::uint32_t(frameIndex * rtpStep);
+            rtp.timestamp = grid.rtpTimestamp(gridIndex);
             rtp.ssrc      = cfg.ssrc;
             rtp.marker    = (idxInFrame + 1 == dgPerFrame);
             hb.frCount = std::uint8_t(frameIndex);
-            hb.videoTimestamp = std::uint32_t(frameIndex * videoTicks);
+            hb.videoTimestamp = grid.videoTimestamp(gridIndex);
 
             // Frame-aligned, the tail datagram zero-padded, as PCAP Replay sends.
             std::uint8_t chunk[kHbrmtPayloadBytes];
@@ -291,12 +323,24 @@ void Sender::run(SenderConfig cfg) {
         if (haveB) txB.sendMany(batch.data(), int(kDatagramBytes), built);
         sent += std::uint64_t(built);
 
+        if (realign) {
+            // Wait for the next grid slot that is still ahead, then pace from it.
+            const std::uint64_t frameIndex = streamPos / dgPerFrame;
+            const std::uint64_t next = grid.indexAtOrAfter(grid.taiFromUtcNs(St2059Grid::utcNowNs()) + 1'000'000);
+            gridBase = std::int64_t(next) - std::int64_t(frameIndex);
+            ++realigns;
+            std::this_thread::sleep_until(utcPoint(next));
+            pacer.resync();
+        }
+
         const PacerStats ps = pacer.stats();
-        if (cfg.maxSeconds > 0.0 && ps.elapsedSeconds >= cfg.maxSeconds) {
+        const double elapsedSeconds =
+            std::chrono::duration<double>(std::chrono::steady_clock::now() - runStart).count();
+        if (cfg.maxSeconds > 0.0 && elapsedSeconds >= cfg.maxSeconds) {
             completed = true;
             break;
         }
-        if (ps.elapsedSeconds - lastPublish >= 0.25) {
+        if (elapsedSeconds - lastPublish >= 0.25) {
             bool producerFailed = false;
             {
                 std::lock_guard<std::mutex> lk(ringMutex);
@@ -307,11 +351,12 @@ void Sender::run(SenderConfig cfg) {
             }
             if (producerFailed) break;
 
-            const double dt = ps.elapsedSeconds - lastPublish;
+            const double dt = elapsedSeconds - lastPublish;
             std::lock_guard<std::mutex> lk(mutex_);
             status_.framesSent = streamPos / dgPerFrame;
             status_.repeatedFrames = repeats;
-            status_.elapsedSeconds = ps.elapsedSeconds;
+            status_.elapsedSeconds = elapsedSeconds;
+            status_.gridRealigns = realigns;
             status_.datagrams = sent;
             status_.achievedPps = double(sent - lastSent) / dt;
             status_.wireMbps = status_.achievedPps * double(kDatagramBytes + 28) * 8.0 / 1e6;
@@ -322,7 +367,7 @@ void Sender::run(SenderConfig cfg) {
                 ? timecodeText(timecodeFromFrames(
                       cfg.composer.timecodeStartFrames + std::int64_t(framesTaken - 1), tcRate))
                 : std::string();
-            lastPublish = ps.elapsedSeconds;
+            lastPublish = elapsedSeconds;
             lastSent = sent;
         }
     }

@@ -603,18 +603,22 @@ int main(int argc, char** argv) {
             reportedStart = true;
             std::printf("path A     : %s\n", s.destinationA.c_str());
             if (!s.destinationB.empty()) std::printf("path B     : %s\n", s.destinationB.c_str());
+            std::printf("RTP time   : ST 2059-1 from the system clock, TAI = UTC + %lld s (%s)\n",
+                        static_cast<long long>(s.taiOffsetS),
+                        s.taiOffsetFromKernel ? "from the kernel" : "kernel has none, assumed");
             if (!s.warning.empty()) std::printf("warning    : %s\n", s.warning.c_str());
         }
         if (!s.running) reportedStart = false;
         if (reportInterval > 0.0 && s.running && s.elapsedSeconds - lastReport >= reportInterval) {
             lastReport = s.elapsedSeconds;
             std::printf("%8.1fs  %s  frame %-9llu %7.0f pps (%5.1f%%)  %6.0f Mb/s/leg"
-                        "  repeats %llu  late %.2f ms%s\n",
+                        "  repeats %llu  late %.2f ms%s%s\n",
                         s.elapsedSeconds, s.timecode.c_str(),
                         static_cast<unsigned long long>(s.framesSent), s.achievedPps,
                         s.targetPps > 0 ? 100.0 * s.achievedPps / s.targetPps : 0.0, s.wireMbps,
                         static_cast<unsigned long long>(s.repeatedFrames), s.maxLatenessUs / 1000.0,
-                        s.audioOverflowPackets ? "  AUDIO OVERFLOW" : "");
+                        s.audioOverflowPackets ? "  AUDIO OVERFLOW" : "",
+                        s.gridRealigns ? ("  REALIGNED x" + std::to_string(s.gridRealigns)).c_str() : "");
             std::fflush(stdout);
         }
     }

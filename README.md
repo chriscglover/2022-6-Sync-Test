@@ -362,7 +362,17 @@ Without them the network and DeckLink paths still work; only `--ndi` and
 
 - **No audio control packets** are sent (ST 299-1 DID E3..E0 / ST 272 extended
   packets). Receivers assume 48 kHz synchronous audio without them.
-- **Timing is internal:** the sender is not PTP-locked. The HBRMT R field is 3.
+- **Timing follows the system clock:** frames sit on the ST 2059-1 grid,
+  and the RTP timestamp (27 MHz) and HBRMT video timestamp (148.5 MHz, or
+  148.5/1.001) are each frame's place on it, counted from the PTP epoch. The
+  sender does not read PTP itself. A PTP-locked analyser therefore agrees with
+  the timestamps only when the system clock follows PTP, through phc2sys or
+  chrony with a PHC refclock. TAI - UTC comes from the kernel; when the kernel
+  has none, 37 s is assumed. The start banner says which. The HBRMT R field is 3.
+- **Falling behind:** a machine that cannot keep up skips whole frame slots,
+  rather than sending late frames with stale timestamps. The status line then
+  shows `REALIGNED xN` and a packet rate below 100%. Burnt-in time-of-day
+  timecode is not adjusted for the skipped frames.
 - **Interlaced motion:** interlaced frames carry the same picture in both fields,
   so the ball moves once per frame, not once per field.
 - **SD markers over SDI:** at 625 and 525 lines each marker cell is only 2
